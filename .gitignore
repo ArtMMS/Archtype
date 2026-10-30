@@ -1,0 +1,29 @@
+# Personal roadmap
+ROADMAP.md
+
+# Build output
+build/
+bin/
+out/
+
+# Objects and binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.dylib
+*.exe
+*.pdb
+*.ilk
+
+# Compiled shaders
+*.spv
+
+# IDEs and editors
+.vscode/
+.idea/
+.vs/
+*.swp
+.DS_Store
