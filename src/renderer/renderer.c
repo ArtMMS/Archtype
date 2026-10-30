@@ -25,6 +25,7 @@ at_renderer *at_renderer_create(const at_renderer_desc *desc) {
     renderer->window = desc->window;
 
     at_vk_context_desc context_desc;
+    context_desc.window            = desc->window;
     context_desc.app_name          = desc->app_name;
     context_desc.enable_validation = desc->enable_validation;
 

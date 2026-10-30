@@ -1,4 +1,5 @@
 #include "archtype/platform/window.h"
+#include "platform/platform_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -100,4 +101,10 @@ bool at_window_is_minimized(const at_window *window) {
     return glfwGetWindowAttrib(window->handle, GLFW_ICONIFIED) == GLFW_TRUE
         || window->width == 0
         || window->height == 0;
+}
+
+VkResult at_window_create_vulkan_surface(const at_window *window,
+                                         VkInstance       instance,
+                                         VkSurfaceKHR    *surface) {
+    return glfwCreateWindowSurface(instance, window->handle, NULL, surface);
 }

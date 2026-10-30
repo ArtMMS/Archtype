@@ -1,4 +1,5 @@
 #include "renderer/vulkan/vk_context.h"
+#include "renderer/vulkan/vk_device.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -143,9 +144,7 @@ static void print_instance_version(void) {
             VK_API_VERSION_PATCH(version));
 }
 
-bool at_vk_context_init(at_vk_context *context, const at_vk_context_desc *desc) {
-    memset(context, 0, sizeof(*context));
-
+static bool create_instance(at_vk_context *context, const at_vk_context_desc *desc) {
     if (!at_platform_vulkan_supported()) {
         fprintf(stderr, "[archtype] Vulkan is not supported on this system\n");
         return false;
@@ -261,12 +260,57 @@ bool at_vk_context_init(at_vk_context *context, const at_vk_context_desc *desc) 
     return true;
 }
 
-void at_vk_context_shutdown(at_vk_context *context) {
-    if (context->instance == VK_NULL_HANDLE) {
-        return;
+/* ------------------------------------------------------------------------ */
+/* Surface                                                                   */
+/* ------------------------------------------------------------------------ */
+
+static bool create_surface(at_vk_context *context, const at_window *window) {
+    VkResult result = at_window_create_vulkan_surface(window, context->instance,
+                                                      &context->surface);
+    if (result != VK_SUCCESS) {
+        AT_VK_LOG_ERROR("glfwCreateWindowSurface", result);
+        return false;
+    }
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Public functions                                                          */
+/* ------------------------------------------------------------------------ */
+
+bool at_vk_context_init(at_vk_context *context, const at_vk_context_desc *desc) {
+    memset(context, 0, sizeof(*context));
+
+    if (!desc->window) {
+        fprintf(stderr, "[archtype] A window is required to create the Vulkan context\n");
+        return false;
     }
 
-    destroy_debug_messenger(context);
-    vkDestroyInstance(context->instance, NULL);
+    bool ok = create_instance(context, desc)
+           && create_surface(context, desc->window)
+           && at_vk_device_select(context)
+           && at_vk_device_create(context);
+
+    if (!ok) {
+        at_vk_context_shutdown(context);
+        return false;
+    }
+
+    return true;
+}
+
+void at_vk_context_shutdown(at_vk_context *context) {
+    /* Destroy in reverse order of creation */
+    at_vk_device_destroy(context);
+
+    if (context->surface != VK_NULL_HANDLE) {
+        vkDestroySurfaceKHR(context->instance, context->surface, NULL);
+    }
+
+    if (context->instance != VK_NULL_HANDLE) {
+        destroy_debug_messenger(context);
+        vkDestroyInstance(context->instance, NULL);
+    }
+
     memset(context, 0, sizeof(*context));
 }
