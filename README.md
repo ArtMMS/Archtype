@@ -27,6 +27,14 @@ Build instructions will be added as the engine develops.
 
 ## Technologies
 
+### Quickstart
+
+```
+cmake -S . -B build -G Ninja
+cmake --build build
+./build/bin/triangle_c.exe
+```
+
 ### Language and API
 
 - **C11** | The engine is written in C11. Its public headers are wrapped in `extern "C"`, so games can be written in **C** or **C++**. **Lua** support is planned through bindings.
