@@ -6,8 +6,9 @@
 
 AT_EXTERN_C_BEGIN
 
-/* Opaque renderer handle. */
+/* Opaque handles. */
 typedef struct at_renderer at_renderer;
+typedef struct at_pipeline at_pipeline;
 
 typedef struct at_renderer_desc {
     at_window  *window;            /* Window the renderer draws into (required)     */
@@ -19,7 +20,8 @@ typedef struct at_renderer_desc {
 /* Creates the renderer. Returns NULL on failure. */
 AT_API at_renderer *at_renderer_create(const at_renderer_desc *desc);
 
-/* Destroys the renderer. Passing NULL is allowed. */
+/* Destroys the renderer. Passing NULL is allowed.                    */
+/* Destroy every pipeline and shader created with it before this.     */
 AT_API void at_renderer_destroy(at_renderer *renderer);
 
 /* Sets the color the screen is cleared to at the start of each frame.   */
@@ -35,6 +37,16 @@ AT_API bool at_renderer_begin_frame(at_renderer *renderer);
 
 /* Finishes the frame and shows it on the window. */
 AT_API void at_renderer_end_frame(at_renderer *renderer);
+
+/* ------------------------------------------------------------------------ */
+/* Draw commands: only valid between begin_frame and end_frame              */
+/* ------------------------------------------------------------------------ */
+
+/* Selects the pipeline used by the next draws. */
+AT_API void at_renderer_bind_pipeline(at_renderer *renderer, at_pipeline *pipeline);
+
+/* Draws vertex_count vertices with the bound pipeline. */
+AT_API void at_renderer_draw(at_renderer *renderer, uint32_t vertex_count);
 
 AT_EXTERN_C_END
 

@@ -16,6 +16,11 @@ bool at_platform_vulkan_supported(void);
 /* The array is owned by the platform layer; do not free it.          */
 const char **at_platform_get_vulkan_extensions(uint32_t *count);
 
+/* Turns a relative path into one relative to the executable's folder.  */
+/* Absolute paths are copied unchanged. Returns false if out is too     */
+/* small.                                                               */
+bool at_platform_resolve_path(const char *path, char *out, size_t out_size);
+
 /* Creates a Vulkan surface for the window. */
 VkResult at_window_create_vulkan_surface(const at_window *window,
                                          VkInstance       instance,

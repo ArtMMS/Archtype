@@ -44,6 +44,10 @@ if(MINGW)
     endif()
 endif()
 
+# Project CMake helpers (cmake/ folder)
+list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+include(ArchtypeShaders)
+
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
@@ -65,8 +69,9 @@ FetchContent_Declare(glfw
 )
 FetchContent_MakeAvailable(glfw)
 
-# Vulkan SDK: headers, validation layers and tools (uses the VULKAN_SDK variable)
-find_package(Vulkan REQUIRED)
+# Vulkan SDK: headers, validation layers and the glslc shader compiler
+# (found through the VULKAN_SDK environment variable)
+find_package(Vulkan REQUIRED COMPONENTS glslc)
 
 # volk: loads Vulkan at runtime, so there is no Vulkan library to link against
 set(VOLK_PULL_IN_VULKAN ON CACHE BOOL "" FORCE)
@@ -81,10 +86,13 @@ FetchContent_MakeAvailable(volk)
 # Engine library
 # ---------------------------------------------------------------------------
 add_library(archtype
+    src/core/file.c
     src/core/version.c
     src/platform/platform.c
     src/platform/window.c
+    src/renderer/pipeline.c
     src/renderer/renderer.c
+    src/renderer/shader.c
     src/renderer/vulkan/vk_common.c
     src/renderer/vulkan/vk_context.c
     src/renderer/vulkan/vk_device.c

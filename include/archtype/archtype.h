@@ -16,5 +16,7 @@
 #include "archtype/platform/window.h"
 
 #include "archtype/renderer/renderer.h"
+#include "archtype/renderer/shader.h"
+#include "archtype/renderer/pipeline.h"
 
 #endif /* ARCHTYPE_H */

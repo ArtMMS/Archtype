@@ -1,27 +1,8 @@
-#include "archtype/renderer/renderer.h"
+#include "renderer/renderer_internal.h"
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include "renderer/vulkan/vk_context.h"
-#include "renderer/vulkan/vk_frame.h"
-#include "renderer/vulkan/vk_swapchain.h"
-
-struct at_renderer {
-    at_window       *window;
-    bool             vsync;
-    float            clear_color[4]; /* sRGB, as given by the user */
-    bool             frame_started;
-
-    /* Window size used to build the current swapchain, to detect resizes */
-    uint32_t         swapchain_width;
-    uint32_t         swapchain_height;
-
-    at_vk_context    context;
-    at_vk_swapchain  swapchain;
-    at_vk_frames     frames;
-};
 
 /* ------------------------------------------------------------------------ */
 /* Helpers                                                                   */
@@ -52,8 +33,39 @@ static bool recreate_swapchain(at_renderer *renderer, uint32_t width, uint32_t h
                                     width, height, renderer->vsync);
 }
 
+/* Viewport and scissor are dynamic: they cover the whole window every frame, */
+/* so pipelines don't need to be recreated when the window is resized.        */
+static void set_viewport_and_scissor(at_renderer *renderer) {
+    VkCommandBuffer command_buffer = at_renderer_command_buffer(renderer);
+    VkExtent2D      extent         = renderer->swapchain.extent;
+
+    VkViewport viewport;
+    viewport.x        = 0.0f;
+    viewport.y        = 0.0f;
+    viewport.width    = (float)extent.width;
+    viewport.height   = (float)extent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+    vkCmdSetViewport(command_buffer, 0, 1, &viewport);
+
+    VkRect2D scissor;
+    scissor.offset.x = 0;
+    scissor.offset.y = 0;
+    scissor.extent   = extent;
+    vkCmdSetScissor(command_buffer, 0, 1, &scissor);
+}
+
+static bool check_recording(const at_renderer *renderer, const char *function) {
+    if (!renderer->frame_started) {
+        fprintf(stderr, "[archtype] %s must be called between begin_frame and end_frame\n",
+                function);
+        return false;
+    }
+    return true;
+}
+
 /* ------------------------------------------------------------------------ */
-/* Public functions                                                          */
+/* Creation and destruction                                                  */
 /* ------------------------------------------------------------------------ */
 
 at_renderer *at_renderer_create(const at_renderer_desc *desc) {
@@ -118,6 +130,10 @@ void at_renderer_destroy(at_renderer *renderer) {
     free(renderer);
 }
 
+/* ------------------------------------------------------------------------ */
+/* Frame                                                                     */
+/* ------------------------------------------------------------------------ */
+
 void at_renderer_set_clear_color(at_renderer *renderer, float r, float g, float b, float a) {
     renderer->clear_color[0] = r;
     renderer->clear_color[1] = g;
@@ -167,7 +183,9 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
         return false;
     }
 
-    renderer->frame_started = true;
+    renderer->frame_started  = true;
+    renderer->bound_pipeline = NULL;
+    set_viewport_and_scissor(renderer);
     return true;
 }
 
@@ -178,5 +196,32 @@ void at_renderer_end_frame(at_renderer *renderer) {
     }
 
     at_vk_frame_end(&renderer->frames, &renderer->context, &renderer->swapchain);
-    renderer->frame_started = false;
+    renderer->frame_started  = false;
+    renderer->bound_pipeline = NULL;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Draw commands                                                             */
+/* ------------------------------------------------------------------------ */
+
+void at_renderer_bind_pipeline(at_renderer *renderer, at_pipeline *pipeline) {
+    if (!check_recording(renderer, "at_renderer_bind_pipeline") || !pipeline) {
+        return;
+    }
+
+    vkCmdBindPipeline(at_renderer_command_buffer(renderer), VK_PIPELINE_BIND_POINT_GRAPHICS,
+                      pipeline->handle);
+    renderer->bound_pipeline = pipeline;
+}
+
+void at_renderer_draw(at_renderer *renderer, uint32_t vertex_count) {
+    if (!check_recording(renderer, "at_renderer_draw")) {
+        return;
+    }
+    if (!renderer->bound_pipeline) {
+        fprintf(stderr, "[archtype] at_renderer_draw called without a bound pipeline\n");
+        return;
+    }
+
+    vkCmdDraw(at_renderer_command_buffer(renderer), vertex_count, 1, 0, 0);
 }

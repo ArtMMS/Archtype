@@ -21,6 +21,11 @@ AT_API void at_platform_wait_events(void);
 /* Returns the time in seconds since at_platform_init() was called.        */
 AT_API double at_platform_get_time(void);
 
+/* Returns the folder that contains the executable, ending with a path     */
+/* separator (e.g. "D:/games/mygame/"). Returns "" if it cannot be found.  */
+/* Relative asset paths given to the engine are resolved from this folder. */
+AT_API const char *at_platform_get_base_path(void);
+
 AT_EXTERN_C_END
 
 #endif /* ARCHTYPE_PLATFORM_PLATFORM_H */

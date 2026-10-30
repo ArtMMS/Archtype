@@ -17,3 +17,11 @@ target_link_libraries(window_c PRIVATE Archtype::archtype)
 # Renderer example (Vulkan instance and validation layers)
 add_executable(renderer_c c/renderer/main.c)
 target_link_libraries(renderer_c PRIVATE Archtype::archtype)
+
+# First triangle (shaders and graphics pipeline)
+add_executable(triangle_c c/triangle/main.c)
+target_link_libraries(triangle_c PRIVATE Archtype::archtype)
+archtype_add_shaders(triangle_c
+    c/triangle/triangle.vert
+    c/triangle/triangle.frag
+)
