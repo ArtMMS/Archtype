@@ -1,4 +1,5 @@
 #include "archtype/platform/platform.h"
+#include "platform/platform_internal.h"
 
 #include <stdio.h>
 
@@ -45,4 +46,12 @@ void at_platform_wait_events(void) {
 
 double at_platform_get_time(void) {
     return glfwGetTime();
+}
+
+bool at_platform_vulkan_supported(void) {
+    return glfwVulkanSupported() == GLFW_TRUE;
+}
+
+const char **at_platform_get_vulkan_extensions(uint32_t *count) {
+    return glfwGetRequiredInstanceExtensions(count);
 }

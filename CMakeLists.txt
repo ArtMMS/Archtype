@@ -30,6 +30,20 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
+# MinGW: use the LLD linker when installed. GNU ld crashes when linking
+# the Vulkan code on some MinGW setups; LLD is compatible and faster.
+if(MINGW)
+    include(CheckLinkerFlag)
+    check_linker_flag(C "-fuse-ld=lld" ARCHTYPE_HAS_LLD)
+    if(ARCHTYPE_HAS_LLD)
+        add_link_options(-fuse-ld=lld)
+        message(STATUS "Archtype: using the LLD linker")
+    else()
+        message(WARNING "Archtype: LLD not found. Install it with: "
+                        "pacman -S mingw-w64-ucrt-x86_64-lld")
+    endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
@@ -51,6 +65,18 @@ FetchContent_Declare(glfw
 )
 FetchContent_MakeAvailable(glfw)
 
+# Vulkan SDK: headers, validation layers and tools (uses the VULKAN_SDK variable)
+find_package(Vulkan REQUIRED)
+
+# volk: loads Vulkan at runtime, so there is no Vulkan library to link against
+set(VOLK_PULL_IN_VULKAN ON CACHE BOOL "" FORCE)
+set(VOLK_INSTALL       OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(volk
+    URL https://github.com/zeux/volk/archive/refs/tags/vulkan-sdk-1.4.363.0.zip
+)
+FetchContent_MakeAvailable(volk)
+
 # ---------------------------------------------------------------------------
 # Engine library
 # ---------------------------------------------------------------------------
@@ -58,6 +84,9 @@ add_library(archtype
     src/core/version.c
     src/platform/platform.c
     src/platform/window.c
+    src/renderer/renderer.c
+    src/renderer/vulkan/vk_common.c
+    src/renderer/vulkan/vk_context.c
 )
 add_library(Archtype::archtype ALIAS archtype)
 
@@ -72,6 +101,7 @@ target_include_directories(archtype
 target_link_libraries(archtype
     PRIVATE
         glfw
+        volk::volk
 )
 
 # The math library uses <math.h>, which needs libm on Linux

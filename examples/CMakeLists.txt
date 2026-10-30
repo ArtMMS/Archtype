@@ -13,3 +13,7 @@ target_link_libraries(hello_cpp PRIVATE Archtype::archtype)
 # Window and main loop example
 add_executable(window_c c/window/main.c)
 target_link_libraries(window_c PRIVATE Archtype::archtype)
+
+# Renderer example (Vulkan instance and validation layers)
+add_executable(renderer_c c/renderer/main.c)
+target_link_libraries(renderer_c PRIVATE Archtype::archtype)

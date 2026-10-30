@@ -15,4 +15,6 @@
 #include "archtype/platform/platform.h"
 #include "archtype/platform/window.h"
 
+#include "archtype/renderer/renderer.h"
+
 #endif /* ARCHTYPE_H */
