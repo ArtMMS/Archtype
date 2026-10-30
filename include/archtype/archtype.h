@@ -6,6 +6,12 @@
 #include "archtype/core/defines.h"
 #include "archtype/core/version.h"
 
+#include "archtype/math/scalar.h"
+#include "archtype/math/vec.h"
+#include "archtype/math/mat4.h"
+#include "archtype/math/quat.h"
+#include "archtype/math/transform.h"
+
 #include "archtype/platform/platform.h"
 #include "archtype/platform/window.h"
 

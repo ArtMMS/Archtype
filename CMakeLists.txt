@@ -10,6 +10,7 @@ project(Archtype
 # Options
 # ---------------------------------------------------------------------------
 option(ARCHTYPE_BUILD_EXAMPLES "Build the example programs" ON)
+option(ARCHTYPE_BUILD_TESTS "Build the tests" ON)
 option(BUILD_SHARED_LIBS "Build Archtype as a shared library" OFF)
 
 # ---------------------------------------------------------------------------
@@ -73,6 +74,11 @@ target_link_libraries(archtype
         glfw
 )
 
+# The math library uses <math.h>, which needs libm on Linux
+if(UNIX AND NOT APPLE)
+    target_link_libraries(archtype PUBLIC m)
+endif()
+
 target_compile_definitions(archtype
     PRIVATE
         AT_BUILDING
@@ -102,4 +108,12 @@ endif()
 if(ARCHTYPE_BUILD_EXAMPLES)
     enable_language(CXX)
     add_subdirectory(examples)
+endif()
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+if(ARCHTYPE_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
