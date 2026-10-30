@@ -30,6 +30,15 @@ bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
                             uint32_t             height,
                             bool                 vsync);
 
+/* Replaces the swapchain with a new one for the given size (window resize, */
+/* out-of-date swapchain). The GPU must be idle before calling this.        */
+/* On failure the swapchain is left empty (handle == VK_NULL_HANDLE).       */
+bool at_vk_swapchain_recreate(at_vk_swapchain     *swapchain,
+                              const at_vk_context *context,
+                              uint32_t             width,
+                              uint32_t             height,
+                              bool                 vsync);
+
 /* Destroys the image views and the swapchain (safe to call twice). */
 void at_vk_swapchain_destroy(at_vk_swapchain *swapchain, const at_vk_context *context);
 

@@ -207,14 +207,17 @@ static bool create_semaphores(at_vk_swapchain *swapchain, const at_vk_context *c
 }
 
 /* ------------------------------------------------------------------------ */
-/* Public functions                                                          */
+/* Creation                                                                  */
 /* ------------------------------------------------------------------------ */
 
-bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
-                            const at_vk_context *context,
-                            uint32_t             width,
-                            uint32_t             height,
-                            bool                 vsync) {
+/* old_swapchain lets the driver reuse resources from the previous swapchain. */
+/* After this call it is "retired" (even on failure) and must be destroyed.   */
+static bool create_swapchain(at_vk_swapchain     *swapchain,
+                             const at_vk_context *context,
+                             uint32_t             width,
+                             uint32_t             height,
+                             bool                 vsync,
+                             VkSwapchainKHR       old_swapchain) {
     memset(swapchain, 0, sizeof(*swapchain));
 
     VkSurfaceCapabilitiesKHR caps;
@@ -249,7 +252,7 @@ bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
     info.compositeAlpha   = choose_composite_alpha(&caps);
     info.presentMode      = present_mode;
     info.clipped          = VK_TRUE;
-    info.oldSwapchain     = VK_NULL_HANDLE;
+    info.oldSwapchain     = old_swapchain;
 
     /* Allow copying into swapchain images later (screenshots, blits) */
     if (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT) {
@@ -294,10 +297,41 @@ bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
         return false;
     }
 
-    fprintf(stderr, "[archtype] Swapchain created: %ux%u, %u images, %s, %s\n",
+    fprintf(stderr, "[archtype] Swapchain %s: %ux%u, %u images, %s, %s\n",
+            old_swapchain != VK_NULL_HANDLE ? "recreated" : "created",
             extent.width, extent.height, swapchain->image_count,
             format_string(swapchain->format), present_mode_string(present_mode));
     return true;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Public functions                                                          */
+/* ------------------------------------------------------------------------ */
+
+bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
+                            const at_vk_context *context,
+                            uint32_t             width,
+                            uint32_t             height,
+                            bool                 vsync) {
+    return create_swapchain(swapchain, context, width, height, vsync, VK_NULL_HANDLE);
+}
+
+bool at_vk_swapchain_recreate(at_vk_swapchain     *swapchain,
+                              const at_vk_context *context,
+                              uint32_t             width,
+                              uint32_t             height,
+                              bool                 vsync) {
+    at_vk_swapchain new_swapchain;
+    bool ok = create_swapchain(&new_swapchain, context, width, height, vsync,
+                               swapchain->handle);
+
+    /* The old swapchain is retired either way, so it is always destroyed */
+    at_vk_swapchain_destroy(swapchain, context);
+
+    if (ok) {
+        *swapchain = new_swapchain;
+    }
+    return ok;
 }
 
 void at_vk_swapchain_destroy(at_vk_swapchain *swapchain, const at_vk_context *context) {

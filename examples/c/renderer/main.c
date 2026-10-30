@@ -14,7 +14,7 @@ int main(void) {
         .title     = WINDOW_TITLE,
         .width     = 1280,
         .height    = 720,
-        .resizable = false, /* Resizing comes with swapchain recreation */
+        .resizable = true,
     };
 
     at_window *window = at_window_create(&window_desc);

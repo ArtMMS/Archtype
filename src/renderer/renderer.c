@@ -14,6 +14,10 @@ struct at_renderer {
     float            clear_color[4]; /* sRGB, as given by the user */
     bool             frame_started;
 
+    /* Window size used to build the current swapchain, to detect resizes */
+    uint32_t         swapchain_width;
+    uint32_t         swapchain_height;
+
     at_vk_context    context;
     at_vk_swapchain  swapchain;
     at_vk_frames     frames;
@@ -34,6 +38,18 @@ static float srgb_to_linear(float c) {
 
 static bool is_srgb_format(VkFormat format) {
     return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
+}
+
+static bool recreate_swapchain(at_renderer *renderer, uint32_t width, uint32_t height) {
+    /* The GPU may still be using the old images: wait until it is done */
+    vkDeviceWaitIdle(renderer->context.device);
+
+    renderer->frames.out_of_date = false;
+    renderer->swapchain_width    = width;
+    renderer->swapchain_height   = height;
+
+    return at_vk_swapchain_recreate(&renderer->swapchain, &renderer->context,
+                                    width, height, renderer->vsync);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -70,8 +86,12 @@ at_renderer *at_renderer_create(const at_renderer_desc *desc) {
     int32_t height = 0;
     at_window_get_size(desc->window, &width, &height);
 
+    renderer->swapchain_width  = (uint32_t)width;
+    renderer->swapchain_height = (uint32_t)height;
+
     bool ok = at_vk_swapchain_create(&renderer->swapchain, &renderer->context,
-                                     (uint32_t)width, (uint32_t)height, renderer->vsync)
+                                     renderer->swapchain_width, renderer->swapchain_height,
+                                     renderer->vsync)
            && at_vk_frames_create(&renderer->frames, &renderer->context);
 
     if (!ok) {
@@ -111,9 +131,25 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
         return false;
     }
 
-    /* Swapchain recreation (window resize) will be handled here later */
-    if (renderer->frames.out_of_date) {
+    int32_t width  = 0;
+    int32_t height = 0;
+    at_window_get_size(renderer->window, &width, &height);
+
+    /* Minimized: there is nothing to draw into */
+    if (width <= 0 || height <= 0) {
         return false;
+    }
+
+    /* Recreate the swapchain if the window was resized, Vulkan reported it */
+    /* as out of date, or a previous recreation failed.                    */
+    bool size_changed = (uint32_t)width  != renderer->swapchain_width
+                     || (uint32_t)height != renderer->swapchain_height;
+
+    if (size_changed || renderer->frames.out_of_date ||
+        renderer->swapchain.handle == VK_NULL_HANDLE) {
+        if (!recreate_swapchain(renderer, (uint32_t)width, (uint32_t)height)) {
+            return false;
+        }
     }
 
     float clear[4];
@@ -124,6 +160,8 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
     }
     clear[3] = renderer->clear_color[3]; /* Alpha is always linear */
 
+    /* If this fails because the swapchain went out of date, it is */
+    /* recreated at the start of the next frame.                   */
     if (!at_vk_frame_begin(&renderer->frames, &renderer->context,
                            &renderer->swapchain, clear)) {
         return false;
