@@ -6,4 +6,7 @@
 #include "archtype/core/defines.h"
 #include "archtype/core/version.h"
 
+#include "archtype/platform/platform.h"
+#include "archtype/platform/window.h"
+
 #endif /* ARCHTYPE_H */
