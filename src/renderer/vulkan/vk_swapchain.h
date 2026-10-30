@@ -1,4 +1,3 @@
-
 #ifndef ARCHTYPE_VK_SWAPCHAIN_H
 #define ARCHTYPE_VK_SWAPCHAIN_H
 
@@ -16,6 +15,11 @@ typedef struct at_vk_swapchain {
     uint32_t         image_count;
     VkImage         *images;      /* Owned by the swapchain, not destroyed by us */
     VkImageView     *image_views; /* One per image, created and destroyed by us  */
+
+    /* Signaled when rendering into an image is done; presentation waits on */
+    /* it. One per image, because an image's semaphore can only be reused   */
+    /* once that same image is acquired again.                              */
+    VkSemaphore     *render_finished;
 } at_vk_swapchain;
 
 /* Creates the swapchain and one image view per image.        */

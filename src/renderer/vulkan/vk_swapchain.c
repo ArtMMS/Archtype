@@ -182,6 +182,30 @@ static bool create_image_views(at_vk_swapchain *swapchain, const at_vk_context *
     return true;
 }
 
+static bool create_semaphores(at_vk_swapchain *swapchain, const at_vk_context *context) {
+    swapchain->render_finished =
+        (VkSemaphore *)calloc(swapchain->image_count, sizeof(*swapchain->render_finished));
+    if (!swapchain->render_finished) {
+        fprintf(stderr, "[archtype] Failed to allocate swapchain semaphores\n");
+        return false;
+    }
+
+    VkSemaphoreCreateInfo info;
+    memset(&info, 0, sizeof(info));
+    info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    for (uint32_t i = 0; i < swapchain->image_count; ++i) {
+        VkResult result = vkCreateSemaphore(context->device, &info, NULL,
+                                            &swapchain->render_finished[i]);
+        if (result != VK_SUCCESS) {
+            AT_VK_LOG_ERROR("vkCreateSemaphore", result);
+            return false;
+        }
+    }
+
+    return true;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Public functions                                                          */
 /* ------------------------------------------------------------------------ */
@@ -265,7 +289,7 @@ bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
     vkGetSwapchainImagesKHR(context->device, swapchain->handle, &swapchain->image_count,
                             swapchain->images);
 
-    if (!create_image_views(swapchain, context)) {
+    if (!create_image_views(swapchain, context) || !create_semaphores(swapchain, context)) {
         at_vk_swapchain_destroy(swapchain, context);
         return false;
     }
@@ -277,6 +301,15 @@ bool at_vk_swapchain_create(at_vk_swapchain     *swapchain,
 }
 
 void at_vk_swapchain_destroy(at_vk_swapchain *swapchain, const at_vk_context *context) {
+    if (swapchain->render_finished) {
+        for (uint32_t i = 0; i < swapchain->image_count; ++i) {
+            if (swapchain->render_finished[i] != VK_NULL_HANDLE) {
+                vkDestroySemaphore(context->device, swapchain->render_finished[i], NULL);
+            }
+        }
+        free(swapchain->render_finished);
+    }
+
     if (swapchain->image_views) {
         for (uint32_t i = 0; i < swapchain->image_count; ++i) {
             if (swapchain->image_views[i] != VK_NULL_HANDLE) {
