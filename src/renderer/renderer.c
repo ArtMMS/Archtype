@@ -101,7 +101,9 @@ at_renderer *at_renderer_create(const at_renderer_desc *desc) {
     renderer->swapchain_width  = (uint32_t)width;
     renderer->swapchain_height = (uint32_t)height;
 
-    bool ok = at_vk_swapchain_create(&renderer->swapchain, &renderer->context,
+    bool ok = at_vk_allocator_create(&renderer->allocator, &renderer->context)
+           && at_vk_upload_create(&renderer->upload, &renderer->context)
+           && at_vk_swapchain_create(&renderer->swapchain, &renderer->context,
                                      renderer->swapchain_width, renderer->swapchain_height,
                                      renderer->vsync)
            && at_vk_frames_create(&renderer->frames, &renderer->context);
@@ -119,11 +121,14 @@ void at_renderer_destroy(at_renderer *renderer) {
         return;
     }
 
-    /* Wait for the GPU before destroying anything it may still be using */
+    /* Wait for the GPU before destroying anything it may still be using. */
+    /* Destroy in reverse order of creation.                              */
     if (renderer->context.device != VK_NULL_HANDLE) {
         vkDeviceWaitIdle(renderer->context.device);
         at_vk_frames_destroy(&renderer->frames, &renderer->context);
         at_vk_swapchain_destroy(&renderer->swapchain, &renderer->context);
+        at_vk_upload_destroy(&renderer->upload, &renderer->context);
+        at_vk_allocator_destroy(&renderer->allocator);
     }
 
     at_vk_context_shutdown(&renderer->context);
@@ -183,8 +188,9 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
         return false;
     }
 
-    renderer->frame_started  = true;
-    renderer->bound_pipeline = NULL;
+    renderer->frame_started      = true;
+    renderer->bound_pipeline     = NULL;
+    renderer->index_buffer_bound = false;
     set_viewport_and_scissor(renderer);
     return true;
 }
@@ -196,8 +202,9 @@ void at_renderer_end_frame(at_renderer *renderer) {
     }
 
     at_vk_frame_end(&renderer->frames, &renderer->context, &renderer->swapchain);
-    renderer->frame_started  = false;
-    renderer->bound_pipeline = NULL;
+    renderer->frame_started      = false;
+    renderer->bound_pipeline     = NULL;
+    renderer->index_buffer_bound = false;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -214,6 +221,36 @@ void at_renderer_bind_pipeline(at_renderer *renderer, at_pipeline *pipeline) {
     renderer->bound_pipeline = pipeline;
 }
 
+void at_renderer_bind_vertex_buffer(at_renderer *renderer, at_buffer *buffer) {
+    if (!check_recording(renderer, "at_renderer_bind_vertex_buffer") || !buffer) {
+        return;
+    }
+    if (buffer->type != AT_BUFFER_VERTEX) {
+        fprintf(stderr, "[archtype] at_renderer_bind_vertex_buffer: not a vertex buffer\n");
+        return;
+    }
+
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(at_renderer_command_buffer(renderer), 0, 1,
+                           &buffer->buffer.handle, &offset);
+}
+
+void at_renderer_bind_index_buffer(at_renderer *renderer, at_buffer *buffer) {
+    if (!check_recording(renderer, "at_renderer_bind_index_buffer") || !buffer) {
+        return;
+    }
+    if (buffer->type != AT_BUFFER_INDEX) {
+        fprintf(stderr, "[archtype] at_renderer_bind_index_buffer: not an index buffer\n");
+        return;
+    }
+
+    VkIndexType index_type = buffer->index_type == AT_INDEX_UINT32 ? VK_INDEX_TYPE_UINT32
+                                                                   : VK_INDEX_TYPE_UINT16;
+    vkCmdBindIndexBuffer(at_renderer_command_buffer(renderer), buffer->buffer.handle, 0,
+                         index_type);
+    renderer->index_buffer_bound = true;
+}
+
 void at_renderer_draw(at_renderer *renderer, uint32_t vertex_count) {
     if (!check_recording(renderer, "at_renderer_draw")) {
         return;
@@ -224,4 +261,17 @@ void at_renderer_draw(at_renderer *renderer, uint32_t vertex_count) {
     }
 
     vkCmdDraw(at_renderer_command_buffer(renderer), vertex_count, 1, 0, 0);
+}
+
+void at_renderer_draw_indexed(at_renderer *renderer, uint32_t index_count) {
+    if (!check_recording(renderer, "at_renderer_draw_indexed")) {
+        return;
+    }
+    if (!renderer->bound_pipeline || !renderer->index_buffer_bound) {
+        fprintf(stderr, "[archtype] at_renderer_draw_indexed needs a bound pipeline "
+                        "and index buffer\n");
+        return;
+    }
+
+    vkCmdDrawIndexed(at_renderer_command_buffer(renderer), index_count, 1, 0, 0, 0);
 }

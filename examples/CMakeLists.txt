@@ -1,7 +1,3 @@
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 # C example
 add_executable(hello_c c/hello/main.c)
 target_link_libraries(hello_c PRIVATE Archtype::archtype)
@@ -24,4 +20,12 @@ target_link_libraries(triangle_c PRIVATE Archtype::archtype)
 archtype_add_shaders(triangle_c
     c/triangle/triangle.vert
     c/triangle/triangle.frag
+)
+
+# Quad drawn from vertex and index buffers
+add_executable(quad_c c/quad/main.c)
+target_link_libraries(quad_c PRIVATE Archtype::archtype)
+archtype_add_shaders(quad_c
+    c/quad/quad.vert
+    c/quad/quad.frag
 )

@@ -9,6 +9,7 @@ AT_EXTERN_C_BEGIN
 /* Opaque handles. */
 typedef struct at_renderer at_renderer;
 typedef struct at_pipeline at_pipeline;
+typedef struct at_buffer   at_buffer;
 
 typedef struct at_renderer_desc {
     at_window  *window;            /* Window the renderer draws into (required)     */
@@ -20,8 +21,8 @@ typedef struct at_renderer_desc {
 /* Creates the renderer. Returns NULL on failure. */
 AT_API at_renderer *at_renderer_create(const at_renderer_desc *desc);
 
-/* Destroys the renderer. Passing NULL is allowed.                    */
-/* Destroy every pipeline and shader created with it before this.     */
+/* Destroys the renderer. Passing NULL is allowed.                         */
+/* Destroy every buffer, pipeline and shader created with it before this.  */
 AT_API void at_renderer_destroy(at_renderer *renderer);
 
 /* Sets the color the screen is cleared to at the start of each frame.   */
@@ -45,8 +46,17 @@ AT_API void at_renderer_end_frame(at_renderer *renderer);
 /* Selects the pipeline used by the next draws. */
 AT_API void at_renderer_bind_pipeline(at_renderer *renderer, at_pipeline *pipeline);
 
-/* Draws vertex_count vertices with the bound pipeline. */
+/* Selects the vertex buffer read by the next draws. */
+AT_API void at_renderer_bind_vertex_buffer(at_renderer *renderer, at_buffer *buffer);
+
+/* Selects the index buffer used by at_renderer_draw_indexed. */
+AT_API void at_renderer_bind_index_buffer(at_renderer *renderer, at_buffer *buffer);
+
+/* Draws vertex_count vertices, in order, with the bound pipeline. */
 AT_API void at_renderer_draw(at_renderer *renderer, uint32_t vertex_count);
+
+/* Draws index_count vertices, picked by the bound index buffer. */
+AT_API void at_renderer_draw_indexed(at_renderer *renderer, uint32_t index_count);
 
 AT_EXTERN_C_END
 

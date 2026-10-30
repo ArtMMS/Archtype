@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(Archtype
     VERSION 0.1.0
     DESCRIPTION "A 2D/3D game engine written in C with Vulkan"
-    LANGUAGES C
+    LANGUAGES C CXX # C++ is only needed to build VMA's implementation
 )
 
 # ---------------------------------------------------------------------------
@@ -20,6 +20,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Default to Debug for single-config generators (Makefiles, Ninja)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -32,7 +36,11 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 # MinGW: use the LLD linker when installed. GNU ld crashes when linking
 # the Vulkan code on some MinGW setups; LLD is compatible and faster.
+# Executables are linked statically, so they don't need the MinGW runtime
+# DLLs (libstdc++, libgcc, libwinpthread) to run.
 if(MINGW)
+    add_link_options(-static)
+
     include(CheckLinkerFlag)
     check_linker_flag(C "-fuse-ld=lld" ARCHTYPE_HAS_LLD)
     if(ARCHTYPE_HAS_LLD)
@@ -82,6 +90,12 @@ FetchContent_Declare(volk
 )
 FetchContent_MakeAvailable(volk)
 
+# VMA (Vulkan Memory Allocator): GPU memory for buffers and images
+FetchContent_Declare(vma
+    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.3.0.zip
+)
+FetchContent_MakeAvailable(vma)
+
 # ---------------------------------------------------------------------------
 # Engine library
 # ---------------------------------------------------------------------------
@@ -90,16 +104,28 @@ add_library(archtype
     src/core/version.c
     src/platform/platform.c
     src/platform/window.c
+    src/renderer/buffer.c
     src/renderer/pipeline.c
     src/renderer/renderer.c
     src/renderer/shader.c
+    src/renderer/vulkan/vk_allocator.c
+    src/renderer/vulkan/vk_buffer.c
     src/renderer/vulkan/vk_common.c
     src/renderer/vulkan/vk_context.c
     src/renderer/vulkan/vk_device.c
-    src/renderer/vulkan/vk_swapchain.c
     src/renderer/vulkan/vk_frame.c
+    src/renderer/vulkan/vk_swapchain.c
+    src/renderer/vulkan/vk_upload.c
+    src/renderer/vulkan/vk_vma.cpp
 )
 add_library(Archtype::archtype ALIAS archtype)
+
+# VMA's implementation is third-party code: don't show its warnings
+if(MSVC)
+    set_source_files_properties(src/renderer/vulkan/vk_vma.cpp PROPERTIES COMPILE_OPTIONS "/w")
+else()
+    set_source_files_properties(src/renderer/vulkan/vk_vma.cpp PROPERTIES COMPILE_OPTIONS "-w")
+endif()
 
 target_include_directories(archtype
     PUBLIC
@@ -113,6 +139,7 @@ target_link_libraries(archtype
     PRIVATE
         glfw
         volk::volk
+        GPUOpen::VulkanMemoryAllocator
 )
 
 # The math library uses <math.h>, which needs libm on Linux
@@ -147,7 +174,6 @@ endif()
 # Examples
 # ---------------------------------------------------------------------------
 if(ARCHTYPE_BUILD_EXAMPLES)
-    enable_language(CXX)
     add_subdirectory(examples)
 endif()
 

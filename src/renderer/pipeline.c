@@ -33,6 +33,17 @@ static VkFrontFace to_vk_front_face(at_front_face face) {
                                     : VK_FRONT_FACE_COUNTER_CLOCKWISE;
 }
 
+static VkFormat to_vk_vertex_format(at_vertex_format format) {
+    switch (format) {
+        case AT_VERTEX_FORMAT_FLOAT2:      return VK_FORMAT_R32G32_SFLOAT;
+        case AT_VERTEX_FORMAT_FLOAT3:      return VK_FORMAT_R32G32B32_SFLOAT;
+        case AT_VERTEX_FORMAT_FLOAT4:      return VK_FORMAT_R32G32B32A32_SFLOAT;
+        case AT_VERTEX_FORMAT_UBYTE4_NORM: return VK_FORMAT_R8G8B8A8_UNORM;
+        case AT_VERTEX_FORMAT_FLOAT:
+        default:                           return VK_FORMAT_R32_SFLOAT;
+    }
+}
+
 static VkPipelineColorBlendAttachmentState make_blend_state(at_blend_mode mode) {
     VkPipelineColorBlendAttachmentState state;
     memset(&state, 0, sizeof(state));
@@ -82,6 +93,14 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
         return NULL;
     }
 
+    const at_vertex_layout *layout = &desc->vertex_layout;
+    if (layout->attribute_count > AT_MAX_VERTEX_ATTRIBUTES ||
+        (layout->attribute_count > 0 && layout->stride == 0)) {
+        fprintf(stderr, "[archtype] Invalid vertex layout (stride is 0 or too many "
+                        "attributes)\n");
+        return NULL;
+    }
+
     at_pipeline *pipeline = (at_pipeline *)calloc(1, sizeof(*pipeline));
     if (!pipeline) {
         fprintf(stderr, "[archtype] Failed to allocate pipeline\n");
@@ -115,11 +134,32 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     stages[1].module = desc->fragment_shader->module;
     stages[1].pName  = "main";
 
-    /* Vertex input: none yet, vertices come from the shader. */
-    /* Vertex buffers come in the next step.                  */
+    /* Vertex input: how to read the vertex buffer (binding 0).     */
+    /* With no attributes, the shader builds its vertices itself.   */
+    VkVertexInputBindingDescription   binding;
+    VkVertexInputAttributeDescription attributes[AT_MAX_VERTEX_ATTRIBUTES];
+
+    memset(&binding, 0, sizeof(binding));
+    binding.binding   = 0;
+    binding.stride    = layout->stride;
+    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+    for (uint32_t i = 0; i < layout->attribute_count; ++i) {
+        attributes[i].location = layout->attributes[i].location;
+        attributes[i].binding  = 0;
+        attributes[i].format   = to_vk_vertex_format(layout->attributes[i].format);
+        attributes[i].offset   = layout->attributes[i].offset;
+    }
+
     VkPipelineVertexInputStateCreateInfo vertex_input;
     memset(&vertex_input, 0, sizeof(vertex_input));
     vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    if (layout->attribute_count > 0) {
+        vertex_input.vertexBindingDescriptionCount   = 1;
+        vertex_input.pVertexBindingDescriptions      = &binding;
+        vertex_input.vertexAttributeDescriptionCount = layout->attribute_count;
+        vertex_input.pVertexAttributeDescriptions    = attributes;
+    }
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly;
     memset(&input_assembly, 0, sizeof(input_assembly));
