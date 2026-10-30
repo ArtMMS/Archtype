@@ -52,6 +52,10 @@ at_window *at_window_create(const at_window_desc *desc) {
     glfwSetWindowUserPointer(window->handle, window);
     glfwSetFramebufferSizeCallback(window->handle, framebuffer_size_callback);
 
+    /* Keep a click reported as "down" until it is polled at least once, */
+    /* so very quick clicks between two frames are not lost.            */
+    glfwSetInputMode(window->handle, GLFW_STICKY_MOUSE_BUTTONS, GLFW_TRUE);
+
     int width  = 0;
     int height = 0;
     glfwGetFramebufferSize(window->handle, &width, &height);
@@ -101,6 +105,39 @@ bool at_window_is_minimized(const at_window *window) {
     return glfwGetWindowAttrib(window->handle, GLFW_ICONIFIED) == GLFW_TRUE
         || window->width == 0
         || window->height == 0;
+}
+
+void at_window_get_mouse_position(const at_window *window, float *x, float *y) {
+    double cursor_x = 0.0;
+    double cursor_y = 0.0;
+    glfwGetCursorPos(window->handle, &cursor_x, &cursor_y);
+
+    /* GLFW reports screen units; convert to framebuffer pixels, which */
+    /* differ on high-DPI displays.                                    */
+    int screen_width  = 0;
+    int screen_height = 0;
+    glfwGetWindowSize(window->handle, &screen_width, &screen_height);
+
+    double scale_x = screen_width  > 0 ? (double)window->width  / screen_width  : 1.0;
+    double scale_y = screen_height > 0 ? (double)window->height / screen_height : 1.0;
+
+    if (x) {
+        *x = (float)(cursor_x * scale_x);
+    }
+    if (y) {
+        *y = (float)(cursor_y * scale_y);
+    }
+}
+
+bool at_window_is_mouse_button_down(const at_window *window, at_mouse_button button) {
+    int glfw_button = GLFW_MOUSE_BUTTON_LEFT;
+    switch (button) {
+        case AT_MOUSE_BUTTON_RIGHT:  glfw_button = GLFW_MOUSE_BUTTON_RIGHT;  break;
+        case AT_MOUSE_BUTTON_MIDDLE: glfw_button = GLFW_MOUSE_BUTTON_MIDDLE; break;
+        case AT_MOUSE_BUTTON_LEFT:
+        default:                     glfw_button = GLFW_MOUSE_BUTTON_LEFT;   break;
+    }
+    return glfwGetMouseButton(window->handle, glfw_button) == GLFW_PRESS;
 }
 
 VkResult at_window_create_vulkan_surface(const at_window *window,

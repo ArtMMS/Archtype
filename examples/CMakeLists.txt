@@ -29,3 +29,11 @@ archtype_add_shaders(quad_c
     c/quad/quad.vert
     c/quad/quad.frag
 )
+
+# Paint: draw a color-changing trail with the mouse
+add_executable(paint_c c/paint/main.c)
+target_link_libraries(paint_c PRIVATE Archtype::archtype)
+archtype_add_shaders(paint_c
+    c/paint/brush.vert
+    c/paint/brush.frag
+)

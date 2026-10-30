@@ -15,6 +15,13 @@ typedef struct at_window_desc {
     bool        resizable;
 } at_window_desc;
 
+/* Mouse buttons. */
+typedef enum at_mouse_button {
+    AT_MOUSE_BUTTON_LEFT = 0,
+    AT_MOUSE_BUTTON_RIGHT,
+    AT_MOUSE_BUTTON_MIDDLE
+} at_mouse_button;
+
 /* Creates a window. Returns NULL on failure. */
 AT_API at_window *at_window_create(const at_window_desc *desc);
 
@@ -38,6 +45,18 @@ AT_API bool at_window_was_resized(at_window *window);
 
 /* Returns true while the window is minimized. */
 AT_API bool at_window_is_minimized(const at_window *window);
+
+/* ------------------------------------------------------------------------ */
+/* Mouse (basic polling; updated by at_platform_poll_events)                */
+/* ------------------------------------------------------------------------ */
+
+/* Gets the cursor position in framebuffer pixels, from the top-left      */
+/* corner of the window (same units as at_window_get_size). The cursor    */
+/* may be outside the window, so values can be negative or past the size. */
+AT_API void at_window_get_mouse_position(const at_window *window, float *x, float *y);
+
+/* Returns true while the mouse button is held down. */
+AT_API bool at_window_is_mouse_button_down(const at_window *window, at_mouse_button button);
 
 AT_EXTERN_C_END
 
