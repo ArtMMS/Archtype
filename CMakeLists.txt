@@ -6,6 +6,9 @@ project(Archtype
     LANGUAGES C CXX # C++ is only needed to build VMA's implementation
 )
 
+# Export commands for clangd
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
