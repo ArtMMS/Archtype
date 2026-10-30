@@ -88,6 +88,7 @@ add_library(archtype
     src/renderer/vulkan/vk_common.c
     src/renderer/vulkan/vk_context.c
     src/renderer/vulkan/vk_device.c
+    src/renderer/vulkan/vk_swapchain.c
 )
 add_library(Archtype::archtype ALIAS archtype)
 

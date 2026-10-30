@@ -10,9 +10,10 @@ AT_EXTERN_C_BEGIN
 typedef struct at_renderer at_renderer;
 
 typedef struct at_renderer_desc {
-    at_window  *window;            /* Window the renderer draws into (required) */
-    const char *app_name;          /* NULL uses "Archtype Application"         */
-    bool        enable_validation; /* Vulkan validation layers (for debugging) */
+    at_window  *window;            /* Window the renderer draws into (required)     */
+    const char *app_name;          /* NULL uses "Archtype Application"             */
+    bool        enable_validation; /* Vulkan validation layers (for debugging)     */
+    bool        vsync;             /* Sync with the monitor refresh (no tearing)   */
 } at_renderer_desc;
 
 /* Creates the renderer. Returns NULL on failure. */

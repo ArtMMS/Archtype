@@ -4,10 +4,13 @@
 #include <stdlib.h>
 
 #include "renderer/vulkan/vk_context.h"
+#include "renderer/vulkan/vk_swapchain.h"
 
 struct at_renderer {
-    at_window     *window;
-    at_vk_context  context;
+    at_window       *window;
+    bool             vsync;
+    at_vk_context    context;
+    at_vk_swapchain  swapchain;
 };
 
 at_renderer *at_renderer_create(const at_renderer_desc *desc) {
@@ -23,6 +26,7 @@ at_renderer *at_renderer_create(const at_renderer_desc *desc) {
     }
 
     renderer->window = desc->window;
+    renderer->vsync  = desc->vsync;
 
     at_vk_context_desc context_desc;
     context_desc.window            = desc->window;
@@ -30,6 +34,17 @@ at_renderer *at_renderer_create(const at_renderer_desc *desc) {
     context_desc.enable_validation = desc->enable_validation;
 
     if (!at_vk_context_init(&renderer->context, &context_desc)) {
+        free(renderer);
+        return NULL;
+    }
+
+    int32_t width  = 0;
+    int32_t height = 0;
+    at_window_get_size(desc->window, &width, &height);
+
+    if (!at_vk_swapchain_create(&renderer->swapchain, &renderer->context,
+                                (uint32_t)width, (uint32_t)height, renderer->vsync)) {
+        at_vk_context_shutdown(&renderer->context);
         free(renderer);
         return NULL;
     }
@@ -42,6 +57,13 @@ void at_renderer_destroy(at_renderer *renderer) {
         return;
     }
 
+    /* Wait for the GPU before destroying anything it may still be using */
+    if (renderer->context.device != VK_NULL_HANDLE) {
+        vkDeviceWaitIdle(renderer->context.device);
+    }
+
+    /* Destroy in reverse order of creation */
+    at_vk_swapchain_destroy(&renderer->swapchain, &renderer->context);
     at_vk_context_shutdown(&renderer->context);
     free(renderer);
 }

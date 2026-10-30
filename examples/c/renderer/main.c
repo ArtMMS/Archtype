@@ -24,6 +24,7 @@ int main(void) {
         .window            = window,
         .app_name          = "Renderer Example",
         .enable_validation = true,
+        .vsync             = true,
     };
 
     at_renderer *renderer = at_renderer_create(&renderer_desc);
