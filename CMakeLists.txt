@@ -16,7 +16,8 @@ option(BUILD_SHARED_LIBS "Build Archtype as a shared library" OFF)
 # ---------------------------------------------------------------------------
 # Global settings
 # ---------------------------------------------------------------------------
-set(CMAKE_C_STANDARD 11)
+# Strict C99 (-std=c99, not gnu99). MSVC has no C99 mode and ignores this.
+set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
