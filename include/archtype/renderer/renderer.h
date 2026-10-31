@@ -25,6 +25,10 @@ AT_API at_renderer *at_renderer_create(const at_renderer_desc *desc);
 /* Destroy every buffer, pipeline and shader created with it before this.  */
 AT_API void at_renderer_destroy(at_renderer *renderer);
 
+/* Gets the size in pixels of the images being drawn (the window size,  */
+/* unless it was just resized). Useful for aspect ratios.               */
+AT_API void at_renderer_get_size(const at_renderer *renderer, uint32_t *width, uint32_t *height);
+
 /* Sets the color the screen is cleared to at the start of each frame.   */
 /* Components go from 0 to 1 and are sRGB, like a color picker value.    */
 /* The default is black.                                                 */
@@ -51,6 +55,16 @@ AT_API void at_renderer_bind_vertex_buffer(at_renderer *renderer, at_buffer *buf
 
 /* Selects the index buffer used by at_renderer_draw_indexed. */
 AT_API void at_renderer_bind_index_buffer(at_renderer *renderer, at_buffer *buffer);
+
+/* Connects a uniform buffer to "layout(set = 0, binding = N)" in the  */
+/* shaders. The binding must be declared in the pipeline description.  */
+AT_API void at_renderer_bind_uniform_buffer(at_renderer *renderer, uint32_t binding,
+                                            at_buffer *buffer);
+
+/* Sends a small block of data (up to the pipeline's push_constant_size) */
+/* straight to the shaders' push_constant block. Fast: meant to change   */
+/* on every draw, e.g. the model matrix of each object.                  */
+AT_API void at_renderer_push_constants(at_renderer *renderer, const void *data, uint32_t size);
 
 /* Draws vertex_count vertices, in order, with the bound pipeline. */
 AT_API void at_renderer_draw(at_renderer *renderer, uint32_t vertex_count);

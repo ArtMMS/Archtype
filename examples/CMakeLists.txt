@@ -37,3 +37,11 @@ archtype_add_shaders(paint_c
     c/paint/brush.vert
     c/paint/brush.frag
 )
+
+# Spinning quads in 3D: uniform buffer (camera) and push constants (per object)
+add_executable(spin_c c/spin/main.c)
+target_link_libraries(spin_c PRIVATE Archtype::archtype)
+archtype_add_shaders(spin_c
+    c/spin/spin.vert
+    c/spin/spin.frag
+)

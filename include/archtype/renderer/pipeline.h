@@ -8,6 +8,8 @@
 AT_EXTERN_C_BEGIN
 
 #define AT_MAX_VERTEX_ATTRIBUTES 8
+#define AT_MAX_BINDINGS          8   /* Resource bindings per pipeline (set 0)  */
+#define AT_MAX_PUSH_CONSTANTS    128 /* Bytes, guaranteed by every Vulkan GPU */
 
 /* How vertices are assembled into primitives. */
 typedef enum at_primitive_topology {
@@ -62,12 +64,38 @@ typedef struct at_vertex_layout {
     at_vertex_attribute attributes[AT_MAX_VERTEX_ATTRIBUTES];
 } at_vertex_layout;
 
+/* Shader stages, combined with | */
+typedef enum at_shader_stage {
+    AT_SHADER_STAGE_VERTEX   = 1 << 0,
+    AT_SHADER_STAGE_FRAGMENT = 1 << 1
+} at_shader_stage;
+
+/* Kind of resource a shader binding reads. */
+typedef enum at_binding_type {
+    AT_BINDING_UNIFORM_BUFFER = 0  /* layout(set = 0, binding = N) uniform Block { ... } */
+} at_binding_type;
+
+/* One resource the shaders use, e.g. the camera uniform buffer. */
+typedef struct at_binding_desc {
+    uint32_t        binding;       /* N in layout(set = 0, binding = N)              */
+    at_binding_type type;
+    uint32_t        stages;        /* at_shader_stage flags; 0 = vertex and fragment */
+} at_binding_desc;
+
 /* Zero-initialize and fill only what you need: the defaults draw opaque, */
 /* unculled triangles without depth testing.                              */
 typedef struct at_pipeline_desc {
     at_shader            *vertex_shader;   /* Required */
     at_shader            *fragment_shader; /* Required */
     at_vertex_layout      vertex_layout;
+
+    /* Resources (uniform buffers...) read by the shaders, in set 0 */
+    uint32_t              binding_count;
+    at_binding_desc       bindings[AT_MAX_BINDINGS];
+
+    /* Size in bytes of the shaders' push_constant block (0 = none,   */
+    /* max AT_MAX_PUSH_CONSTANTS). Visible to vertex and fragment.    */
+    uint32_t              push_constant_size;
 
     at_primitive_topology topology;
     at_cull_mode          cull_mode;
