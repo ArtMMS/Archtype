@@ -145,17 +145,16 @@ static void print_instance_version(void) {
 }
 
 static bool create_instance(at_vk_context *context, const at_vk_context_desc *desc) {
-    if (!at_platform_vulkan_supported()) {
-        fprintf(stderr, "[archtype] Vulkan is not supported on this system\n");
-        return false;
-    }
-
-    /* Load the Vulkan loader (vulkan-1.dll / libvulkan.so) and its global functions */
-    VkResult result = volkInitialize();
-    if (result != VK_SUCCESS) {
+    /* The platform layer loads the Vulkan loader (vulkan-1.dll / libvulkan.so) */
+    /* and volk takes every function from it, so both use the same library.     */
+    PFN_vkGetInstanceProcAddr get_instance_proc_addr = at_platform_load_vulkan();
+    if (!get_instance_proc_addr) {
         fprintf(stderr, "[archtype] Could not load Vulkan. Is a Vulkan driver installed?\n");
         return false;
     }
+    context->vulkan_loaded = true;
+
+    volkInitializeCustom(get_instance_proc_addr);
 
     print_instance_version();
 
@@ -173,8 +172,8 @@ static bool create_instance(at_vk_context *context, const at_vk_context_desc *de
     }
 
     /* Instance extensions: what the window system needs, plus debug utils */
-    uint32_t     platform_count      = 0;
-    const char **platform_extensions = at_platform_get_vulkan_extensions(&platform_count);
+    uint32_t           platform_count      = 0;
+    const char *const *platform_extensions = at_platform_get_vulkan_extensions(&platform_count);
     if (!platform_extensions) {
         fprintf(stderr, "[archtype] Could not get the Vulkan extensions for windows\n");
         return false;
@@ -232,7 +231,7 @@ static bool create_instance(at_vk_context *context, const at_vk_context_desc *de
         create_info.pNext               = &debug_info;
     }
 
-    result = vkCreateInstance(&create_info, NULL, &context->instance);
+    VkResult result = vkCreateInstance(&create_info, NULL, &context->instance);
     if (result != VK_SUCCESS) {
         AT_VK_LOG_ERROR("vkCreateInstance", result);
         return false;
@@ -265,13 +264,8 @@ static bool create_instance(at_vk_context *context, const at_vk_context_desc *de
 /* ------------------------------------------------------------------------ */
 
 static bool create_surface(at_vk_context *context, const at_window *window) {
-    VkResult result = at_window_create_vulkan_surface(window, context->instance,
-                                                      &context->surface);
-    if (result != VK_SUCCESS) {
-        AT_VK_LOG_ERROR("glfwCreateWindowSurface", result);
-        return false;
-    }
-    return true;
+    /* The platform layer logs the reason on failure */
+    return at_window_create_vulkan_surface(window, context->instance, &context->surface);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -300,6 +294,8 @@ bool at_vk_context_init(at_vk_context *context, const at_vk_context_desc *desc) 
 }
 
 void at_vk_context_shutdown(at_vk_context *context) {
+    bool vulkan_loaded = context->vulkan_loaded;
+
     /* Destroy in reverse order of creation */
     at_vk_device_destroy(context);
 
@@ -313,4 +309,9 @@ void at_vk_context_shutdown(at_vk_context *context) {
     }
 
     memset(context, 0, sizeof(*context));
+
+    /* Last: nothing may call Vulkan after the library is released */
+    if (vulkan_loaded) {
+        at_platform_unload_vulkan();
+    }
 }

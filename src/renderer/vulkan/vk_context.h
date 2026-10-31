@@ -13,6 +13,9 @@ typedef struct at_vk_context_desc {
 } at_vk_context_desc;
 
 typedef struct at_vk_context {
+    /* Vulkan library, loaded through the platform layer */
+    bool                     vulkan_loaded;
+
     /* Instance */
     VkInstance               instance;
     VkDebugUtilsMessengerEXT debug_messenger;
