@@ -68,20 +68,8 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-# GLFW: window creation, events and Vulkan surface creation.
-# Being replaced by SDL3 (ROADMAP 1.2.1).
-set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
-set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-set(GLFW_INSTALL        OFF CACHE BOOL "" FORCE)
-
-FetchContent_Declare(glfw
-    URL https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.zip
-)
-FetchContent_MakeAvailable(glfw)
-
-# SDL3: windows, events, time, executable path and Vulkan surface creation.
-# Built as a static library, so games don't need an extra SDL3.dll.
+# SDL3: windows, events, time, executable path, Vulkan loading and surface
+# creation. Built as a static library, so games don't need an extra SDL3.dll.
 set(SDL_SHARED       OFF CACHE BOOL "" FORCE)
 set(SDL_STATIC       ON  CACHE BOOL "" FORCE)
 set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
@@ -98,7 +86,8 @@ FetchContent_MakeAvailable(SDL3)
 # (found through the VULKAN_SDK environment variable)
 find_package(Vulkan REQUIRED COMPONENTS glslc)
 
-# volk: loads Vulkan at runtime, so there is no Vulkan library to link against
+# volk: takes every Vulkan function from the loader that SDL opens, so there
+# is no Vulkan library to link against
 set(VOLK_PULL_IN_VULKAN ON CACHE BOOL "" FORCE)
 set(VOLK_INSTALL       OFF CACHE BOOL "" FORCE)
 
@@ -172,7 +161,6 @@ target_include_directories(archtype
 
 target_link_libraries(archtype
     PRIVATE
-        glfw
         SDL3::SDL3-static
         volk::volk
         GPUOpen::VulkanMemoryAllocator
@@ -186,7 +174,6 @@ endif()
 target_compile_definitions(archtype
     PRIVATE
         AT_BUILDING
-        GLFW_INCLUDE_NONE   # Do not let GLFW include OpenGL headers
         AT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
         AT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
         AT_VERSION_PATCH=${PROJECT_VERSION_PATCH}
