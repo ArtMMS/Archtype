@@ -10,6 +10,7 @@ AT_EXTERN_C_BEGIN
 typedef struct at_renderer at_renderer;
 typedef struct at_pipeline at_pipeline;
 typedef struct at_buffer   at_buffer;
+typedef struct at_texture  at_texture;
 
 typedef struct at_renderer_desc {
     at_window  *window;            /* Window the renderer draws into (required)     */
@@ -22,7 +23,8 @@ typedef struct at_renderer_desc {
 AT_API at_renderer *at_renderer_create(const at_renderer_desc *desc);
 
 /* Destroys the renderer. Passing NULL is allowed.                         */
-/* Destroy every buffer, pipeline and shader created with it before this.  */
+/* Destroy every buffer, texture, pipeline and shader created with it      */
+/* before this.                                                            */
 AT_API void at_renderer_destroy(at_renderer *renderer);
 
 /* Gets the size in pixels of the images being drawn (the window size,  */
@@ -60,6 +62,11 @@ AT_API void at_renderer_bind_index_buffer(at_renderer *renderer, at_buffer *buff
 /* shaders. The binding must be declared in the pipeline description.  */
 AT_API void at_renderer_bind_uniform_buffer(at_renderer *renderer, uint32_t binding,
                                             at_buffer *buffer);
+
+/* Connects a texture to "layout(set = 0, binding = N) uniform sampler2D" */
+/* in the shaders. The binding must be declared in the pipeline.         */
+AT_API void at_renderer_bind_texture(at_renderer *renderer, uint32_t binding,
+                                     at_texture *texture);
 
 /* Sends a small block of data (up to the pipeline's push_constant_size) */
 /* straight to the shaders' push_constant block. Fast: meant to change   */

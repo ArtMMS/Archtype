@@ -45,3 +45,15 @@ archtype_add_shaders(spin_c
     c/spin/spin.vert
     c/spin/spin.frag
 )
+
+# Textures: a generated checkerboard and an image loaded from a file.
+# Put any PNG/JPG at c/texture/image.png and run CMake again to use it.
+add_executable(texture_c c/texture/main.c)
+target_link_libraries(texture_c PRIVATE Archtype::archtype)
+archtype_add_shaders(texture_c
+    c/texture/texture.vert
+    c/texture/texture.frag
+)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/c/texture/image.png")
+    archtype_add_assets(texture_c textures c/texture/image.png)
+endif()

@@ -61,8 +61,9 @@ static VkShaderStageFlags to_vk_stages(uint32_t stages) {
 
 static VkDescriptorType to_vk_descriptor_type(at_binding_type type) {
     switch (type) {
+        case AT_BINDING_TEXTURE:        return VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         case AT_BINDING_UNIFORM_BUFFER:
-        default: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        default:                        return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     }
 }
 

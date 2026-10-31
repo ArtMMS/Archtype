@@ -7,12 +7,14 @@
 #include "archtype/renderer/renderer.h"
 #include "archtype/renderer/buffer.h"
 #include "archtype/renderer/pipeline.h"
+#include "archtype/renderer/texture.h"
 
 #include "renderer/vulkan/vk_allocator.h"
 #include "renderer/vulkan/vk_buffer.h"
 #include "renderer/vulkan/vk_context.h"
 #include "renderer/vulkan/vk_descriptors.h"
 #include "renderer/vulkan/vk_frame.h"
+#include "renderer/vulkan/vk_image.h"
 #include "renderer/vulkan/vk_swapchain.h"
 #include "renderer/vulkan/vk_upload.h"
 
@@ -25,7 +27,8 @@ struct at_renderer {
     bool               frame_started;
     at_pipeline       *bound_pipeline;
     bool               index_buffer_bound;
-    at_buffer         *bound_uniforms[AT_MAX_BINDINGS];
+    at_buffer         *bound_buffers[AT_MAX_BINDINGS];  /* Uniform buffers by binding */
+    at_texture        *bound_textures[AT_MAX_BINDINGS]; /* Textures by binding        */
     bool               descriptors_dirty; /* Bindings changed since the last draw */
 
     /* Window size used to build the current swapchain, to detect resizes */
@@ -59,6 +62,11 @@ struct at_buffer {
     at_index_type  index_type;
     size_t         size;         /* Size requested by the user                   */
     VkDeviceSize   frame_stride; /* Uniform buffers: distance between the copies */
+};
+
+struct at_texture {
+    at_vk_image image;
+    VkSampler   sampler;
 };
 
 /* Command buffer being recorded for the current frame. */

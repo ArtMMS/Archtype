@@ -69,7 +69,8 @@ static void reset_frame_state(at_renderer *renderer) {
     renderer->bound_pipeline     = NULL;
     renderer->index_buffer_bound = false;
     renderer->descriptors_dirty  = true;
-    memset(renderer->bound_uniforms, 0, sizeof(renderer->bound_uniforms));
+    memset(renderer->bound_buffers, 0, sizeof(renderer->bound_buffers));
+    memset(renderer->bound_textures, 0, sizeof(renderer->bound_textures));
 }
 
 /* Before a draw: if the bound pipeline reads resources and the bindings  */
@@ -90,30 +91,48 @@ static bool prepare_descriptors(at_renderer *renderer) {
     }
 
     VkDescriptorBufferInfo buffer_infos[AT_MAX_BINDINGS];
+    VkDescriptorImageInfo  image_infos[AT_MAX_BINDINGS];
     VkWriteDescriptorSet   writes[AT_MAX_BINDINGS];
     memset(writes, 0, sizeof(writes));
 
     for (uint32_t i = 0; i < pipeline->binding_count; ++i) {
         const at_binding_desc *binding = &pipeline->bindings[i];
-        at_buffer             *buffer  = renderer->bound_uniforms[binding->binding];
-
-        if (!buffer) {
-            fprintf(stderr, "[archtype] Draw skipped: nothing bound to binding %u\n",
-                    binding->binding);
-            return false;
-        }
-
-        /* Point at this frame's copy of the uniform buffer */
-        buffer_infos[i].buffer = buffer->buffer.handle;
-        buffer_infos[i].offset = buffer->frame_stride * frame;
-        buffer_infos[i].range  = buffer->size;
 
         writes[i].sType           = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[i].dstSet          = set;
         writes[i].dstBinding      = binding->binding;
         writes[i].descriptorCount = 1;
-        writes[i].descriptorType  = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        writes[i].pBufferInfo     = &buffer_infos[i];
+
+        if (binding->type == AT_BINDING_TEXTURE) {
+            at_texture *texture = renderer->bound_textures[binding->binding];
+            if (!texture) {
+                fprintf(stderr, "[archtype] Draw skipped: no texture bound to binding %u\n",
+                        binding->binding);
+                return false;
+            }
+
+            image_infos[i].sampler     = texture->sampler;
+            image_infos[i].imageView   = texture->image.view;
+            image_infos[i].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            writes[i].pImageInfo     = &image_infos[i];
+        } else {
+            at_buffer *buffer = renderer->bound_buffers[binding->binding];
+            if (!buffer) {
+                fprintf(stderr, "[archtype] Draw skipped: no uniform buffer bound to "
+                                "binding %u\n", binding->binding);
+                return false;
+            }
+
+            /* Point at this frame's copy of the uniform buffer */
+            buffer_infos[i].buffer = buffer->buffer.handle;
+            buffer_infos[i].offset = buffer->frame_stride * frame;
+            buffer_infos[i].range  = buffer->size;
+
+            writes[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writes[i].pBufferInfo    = &buffer_infos[i];
+        }
     }
 
     vkUpdateDescriptorSets(renderer->context.device, pipeline->binding_count, writes, 0, NULL);
@@ -353,7 +372,21 @@ void at_renderer_bind_uniform_buffer(at_renderer *renderer, uint32_t binding,
         return;
     }
 
-    renderer->bound_uniforms[binding] = buffer;
+    renderer->bound_buffers[binding] = buffer;
+    renderer->descriptors_dirty      = true;
+}
+
+void at_renderer_bind_texture(at_renderer *renderer, uint32_t binding, at_texture *texture) {
+    if (!check_recording(renderer, "at_renderer_bind_texture") || !texture) {
+        return;
+    }
+    if (binding >= AT_MAX_BINDINGS) {
+        fprintf(stderr, "[archtype] at_renderer_bind_texture: binding %u out of range\n",
+                binding);
+        return;
+    }
+
+    renderer->bound_textures[binding] = texture;
     renderer->descriptors_dirty       = true;
 }
 

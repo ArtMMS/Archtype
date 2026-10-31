@@ -6,9 +6,6 @@ project(Archtype
     LANGUAGES C CXX # C++ is only needed to build VMA's implementation
 )
 
-# Export commands for clangd
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
@@ -58,6 +55,7 @@ endif()
 # Project CMake helpers (cmake/ folder)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(ArchtypeShaders)
+include(ArchtypeAssets)
 
 # ---------------------------------------------------------------------------
 # Dependencies
@@ -99,6 +97,13 @@ FetchContent_Declare(vma
 )
 FetchContent_MakeAvailable(vma)
 
+# stb_image: image loading for textures (single header, no CMake project).
+# Temporary: will be replaced by SDL3_image (ROADMAP 1.2.1).
+FetchContent_Declare(stb
+    URL https://github.com/nothings/stb/archive/013ac3beddff3dbffafd5177e7972067cd2b5083.zip
+)
+FetchContent_MakeAvailable(stb)
+
 # ---------------------------------------------------------------------------
 # Engine library
 # ---------------------------------------------------------------------------
@@ -108,9 +113,12 @@ add_library(archtype
     src/platform/platform.c
     src/platform/window.c
     src/renderer/buffer.c
+    src/renderer/image_loader.c
     src/renderer/pipeline.c
     src/renderer/renderer.c
     src/renderer/shader.c
+    src/renderer/stb_image_impl.c
+    src/renderer/texture.c
     src/renderer/vulkan/vk_allocator.c
     src/renderer/vulkan/vk_buffer.c
     src/renderer/vulkan/vk_common.c
@@ -118,17 +126,23 @@ add_library(archtype
     src/renderer/vulkan/vk_descriptors.c
     src/renderer/vulkan/vk_device.c
     src/renderer/vulkan/vk_frame.c
+    src/renderer/vulkan/vk_image.c
     src/renderer/vulkan/vk_swapchain.c
     src/renderer/vulkan/vk_upload.c
     src/renderer/vulkan/vk_vma.cpp
 )
 add_library(Archtype::archtype ALIAS archtype)
 
-# VMA's implementation is third-party code: don't show its warnings
+# VMA's and stb_image's implementations are third-party code: don't show
+# their warnings
+set(ARCHTYPE_THIRD_PARTY_SOURCES
+    src/renderer/vulkan/vk_vma.cpp
+    src/renderer/stb_image_impl.c
+)
 if(MSVC)
-    set_source_files_properties(src/renderer/vulkan/vk_vma.cpp PROPERTIES COMPILE_OPTIONS "/w")
+    set_source_files_properties(${ARCHTYPE_THIRD_PARTY_SOURCES} PROPERTIES COMPILE_OPTIONS "/w")
 else()
-    set_source_files_properties(src/renderer/vulkan/vk_vma.cpp PROPERTIES COMPILE_OPTIONS "-w")
+    set_source_files_properties(${ARCHTYPE_THIRD_PARTY_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
 endif()
 
 target_include_directories(archtype
@@ -137,6 +151,7 @@ target_include_directories(archtype
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
+        ${stb_SOURCE_DIR}
 )
 
 target_link_libraries(archtype
