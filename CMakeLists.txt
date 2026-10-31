@@ -112,6 +112,7 @@ add_library(archtype
     src/renderer/vulkan/vk_buffer.c
     src/renderer/vulkan/vk_common.c
     src/renderer/vulkan/vk_context.c
+    src/renderer/vulkan/vk_descriptors.c
     src/renderer/vulkan/vk_device.c
     src/renderer/vulkan/vk_frame.c
     src/renderer/vulkan/vk_swapchain.c

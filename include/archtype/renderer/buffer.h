@@ -8,8 +8,9 @@ AT_EXTERN_C_BEGIN
 
 /* What the buffer holds. */
 typedef enum at_buffer_type {
-    AT_BUFFER_VERTEX = 0,          /* Vertex data (positions, colors, UVs...) */
-    AT_BUFFER_INDEX                /* Indices into the vertex buffer          */
+    AT_BUFFER_VERTEX = 0,          /* Vertex data (positions, colors, UVs...)    */
+    AT_BUFFER_INDEX,               /* Indices into the vertex buffer             */
+    AT_BUFFER_UNIFORM              /* Shader constants that change every frame   */
 } at_buffer_type;
 
 /* Size of each index in an index buffer. */
@@ -25,13 +26,19 @@ typedef struct at_buffer_desc {
     const void    *data;           /* Initial contents, or NULL to leave empty */
 } at_buffer_desc;
 
-/* Creates a buffer in GPU memory, optionally filled with desc->data. */
+/* Creates a buffer, optionally filled with desc->data.               */
+/* Vertex and index buffers live in fast GPU memory.                  */
+/* Uniform buffers keep one copy per frame in flight, so they can be  */
+/* rewritten every frame without waiting for the GPU.                 */
 /* Returns NULL on failure.                                           */
 AT_API at_buffer *at_buffer_create(at_renderer *renderer, const at_buffer_desc *desc);
 
-/* Replaces size bytes of the buffer, starting at offset.            */
-/* Waits for the GPU, so it is meant for occasional changes, not for */
-/* data that changes every frame.                                    */
+/* Replaces size bytes of the buffer, starting at offset.                  */
+/*   Vertex/index buffers: waits for the GPU, so it is meant for           */
+/*   occasional changes.                                                   */
+/*   Uniform buffers: no waiting. Must be called between begin_frame and   */
+/*   end_frame, and only changes what the current frame sees: write it in  */
+/*   every frame that uses it.                                             */
 AT_API bool at_buffer_update(at_renderer *renderer, at_buffer *buffer,
                              const void *data, size_t size, size_t offset);
 

@@ -44,6 +44,28 @@ static VkFormat to_vk_vertex_format(at_vertex_format format) {
     }
 }
 
+static VkShaderStageFlags to_vk_stages(uint32_t stages) {
+    if (stages == 0) {
+        return VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+
+    VkShaderStageFlags flags = 0;
+    if (stages & AT_SHADER_STAGE_VERTEX) {
+        flags |= VK_SHADER_STAGE_VERTEX_BIT;
+    }
+    if (stages & AT_SHADER_STAGE_FRAGMENT) {
+        flags |= VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    return flags;
+}
+
+static VkDescriptorType to_vk_descriptor_type(at_binding_type type) {
+    switch (type) {
+        case AT_BINDING_UNIFORM_BUFFER:
+        default: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    }
+}
+
 static VkPipelineColorBlendAttachmentState make_blend_state(at_blend_mode mode) {
     VkPipelineColorBlendAttachmentState state;
     memset(&state, 0, sizeof(state));
@@ -101,6 +123,24 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
         return NULL;
     }
 
+    if (desc->binding_count > AT_MAX_BINDINGS) {
+        fprintf(stderr, "[archtype] Too many pipeline bindings (max %d)\n", AT_MAX_BINDINGS);
+        return NULL;
+    }
+    for (uint32_t i = 0; i < desc->binding_count; ++i) {
+        if (desc->bindings[i].binding >= AT_MAX_BINDINGS) {
+            fprintf(stderr, "[archtype] Binding %u is out of range (max %d)\n",
+                    desc->bindings[i].binding, AT_MAX_BINDINGS - 1);
+            return NULL;
+        }
+    }
+
+    if (desc->push_constant_size > AT_MAX_PUSH_CONSTANTS || desc->push_constant_size % 4 != 0) {
+        fprintf(stderr, "[archtype] push_constant_size must be a multiple of 4, up to %d\n",
+                AT_MAX_PUSH_CONSTANTS);
+        return NULL;
+    }
+
     at_pipeline *pipeline = (at_pipeline *)calloc(1, sizeof(*pipeline));
     if (!pipeline) {
         fprintf(stderr, "[archtype] Failed to allocate pipeline\n");
@@ -108,16 +148,62 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     }
 
     VkDevice device = renderer->context.device;
+    VkResult result = VK_SUCCESS;
 
-    /* Pipeline layout: what data the shaders receive besides vertices.   */
-    /* Empty for now; push constants and descriptor sets come later.      */
+    pipeline->binding_count      = desc->binding_count;
+    pipeline->push_constant_size = desc->push_constant_size;
+    memcpy(pipeline->bindings, desc->bindings, sizeof(pipeline->bindings));
+
+    /* Descriptor set layout: the resources the shaders read in set 0 */
+    if (desc->binding_count > 0) {
+        VkDescriptorSetLayoutBinding set_bindings[AT_MAX_BINDINGS];
+        memset(set_bindings, 0, sizeof(set_bindings));
+
+        for (uint32_t i = 0; i < desc->binding_count; ++i) {
+            set_bindings[i].binding         = desc->bindings[i].binding;
+            set_bindings[i].descriptorType  = to_vk_descriptor_type(desc->bindings[i].type);
+            set_bindings[i].descriptorCount = 1;
+            set_bindings[i].stageFlags      = to_vk_stages(desc->bindings[i].stages);
+        }
+
+        VkDescriptorSetLayoutCreateInfo set_info;
+        memset(&set_info, 0, sizeof(set_info));
+        set_info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        set_info.bindingCount = desc->binding_count;
+        set_info.pBindings    = set_bindings;
+
+        result = vkCreateDescriptorSetLayout(device, &set_info, NULL, &pipeline->set_layout);
+        if (result != VK_SUCCESS) {
+            AT_VK_LOG_ERROR("vkCreateDescriptorSetLayout", result);
+            free(pipeline);
+            return NULL;
+        }
+    }
+
+    /* Pipeline layout: descriptor set 0 and the push constant block */
+    VkPushConstantRange push_range;
+    push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    push_range.offset     = 0;
+    push_range.size       = desc->push_constant_size;
+
     VkPipelineLayoutCreateInfo layout_info;
     memset(&layout_info, 0, sizeof(layout_info));
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    if (pipeline->set_layout != VK_NULL_HANDLE) {
+        layout_info.setLayoutCount = 1;
+        layout_info.pSetLayouts    = &pipeline->set_layout;
+    }
+    if (desc->push_constant_size > 0) {
+        layout_info.pushConstantRangeCount = 1;
+        layout_info.pPushConstantRanges    = &push_range;
+    }
 
-    VkResult result = vkCreatePipelineLayout(device, &layout_info, NULL, &pipeline->layout);
+    result = vkCreatePipelineLayout(device, &layout_info, NULL, &pipeline->layout);
     if (result != VK_SUCCESS) {
         AT_VK_LOG_ERROR("vkCreatePipelineLayout", result);
+        if (pipeline->set_layout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, pipeline->set_layout, NULL);
+        }
         free(pipeline);
         return NULL;
     }
@@ -243,6 +329,9 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     if (result != VK_SUCCESS) {
         AT_VK_LOG_ERROR("vkCreateGraphicsPipelines", result);
         vkDestroyPipelineLayout(device, pipeline->layout, NULL);
+        if (pipeline->set_layout != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, pipeline->set_layout, NULL);
+        }
         free(pipeline);
         return NULL;
     }
@@ -262,5 +351,8 @@ void at_pipeline_destroy(at_renderer *renderer, at_pipeline *pipeline) {
 
     vkDestroyPipeline(device, pipeline->handle, NULL);
     vkDestroyPipelineLayout(device, pipeline->layout, NULL);
+    if (pipeline->set_layout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, pipeline->set_layout, NULL);
+    }
     free(pipeline);
 }
