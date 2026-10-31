@@ -68,7 +68,8 @@ if(POLICY CMP0135)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-# GLFW: window creation, events and Vulkan surface creation
+# GLFW: window creation, events and Vulkan surface creation.
+# Being replaced by SDL3 (ROADMAP 1.2.1).
 set(GLFW_BUILD_DOCS     OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -78,6 +79,20 @@ FetchContent_Declare(glfw
     URL https://github.com/glfw/glfw/releases/download/3.4/glfw-3.4.zip
 )
 FetchContent_MakeAvailable(glfw)
+
+# SDL3: windows, events, time, executable path and Vulkan surface creation.
+# Built as a static library, so games don't need an extra SDL3.dll.
+set(SDL_SHARED       OFF CACHE BOOL "" FORCE)
+set(SDL_STATIC       ON  CACHE BOOL "" FORCE)
+set(SDL_TEST_LIBRARY OFF CACHE BOOL "" FORCE)
+set(SDL_TESTS        OFF CACHE BOOL "" FORCE)
+set(SDL_EXAMPLES     OFF CACHE BOOL "" FORCE)
+set(SDL_INSTALL      OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(SDL3
+    URL https://github.com/libsdl-org/SDL/archive/refs/tags/release-3.4.18.zip
+)
+FetchContent_MakeAvailable(SDL3)
 
 # Vulkan SDK: headers, validation layers and the glslc shader compiler
 # (found through the VULKAN_SDK environment variable)
@@ -158,6 +173,7 @@ target_include_directories(archtype
 target_link_libraries(archtype
     PRIVATE
         glfw
+        SDL3::SDL3-static
         volk::volk
         GPUOpen::VulkanMemoryAllocator
 )
