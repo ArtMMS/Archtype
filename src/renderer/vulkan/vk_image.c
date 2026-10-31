@@ -42,7 +42,7 @@ static void transition_image(VkCommandBuffer       command_buffer,
 }
 
 bool at_vk_image_create(at_vk_image         *image,
-                        VmaAllocator         allocator,
+                        at_vk_allocator     *allocator,
                         const at_vk_context *context,
                         uint32_t             width,
                         uint32_t             height,
@@ -66,14 +66,16 @@ bool at_vk_image_create(at_vk_image         *image,
     image_info.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
     image_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-    VmaAllocationCreateInfo alloc_info;
-    memset(&alloc_info, 0, sizeof(alloc_info));
-    alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
-
-    VkResult result = vmaCreateImage(allocator, &image_info, &alloc_info,
-                                     &image->handle, &image->allocation, NULL);
+    VkResult result = vkCreateImage(context->device, &image_info, NULL, &image->handle);
     if (result != VK_SUCCESS) {
-        AT_VK_LOG_ERROR("vmaCreateImage", result);
+        AT_VK_LOG_ERROR("vkCreateImage", result);
+        memset(image, 0, sizeof(*image));
+        return false;
+    }
+
+    if (!at_vk_allocator_alloc_image(allocator, image->handle, AT_VK_MEMORY_GPU,
+                                     &image->allocation)) {
+        vkDestroyImage(context->device, image->handle, NULL);
         memset(image, 0, sizeof(*image));
         return false;
     }
@@ -108,18 +110,21 @@ bool at_vk_image_create(at_vk_image         *image,
     return true;
 }
 
-void at_vk_image_destroy(at_vk_image *image, VmaAllocator allocator, const at_vk_context *context) {
+void at_vk_image_destroy(at_vk_image         *image,
+                         at_vk_allocator     *allocator,
+                         const at_vk_context *context) {
     if (image->view != VK_NULL_HANDLE) {
         vkDestroyImageView(context->device, image->view, NULL);
     }
     if (image->handle != VK_NULL_HANDLE) {
-        vmaDestroyImage(allocator, image->handle, image->allocation);
+        vkDestroyImage(context->device, image->handle, NULL);
     }
+    at_vk_allocator_free(allocator, &image->allocation);
     memset(image, 0, sizeof(*image));
 }
 
 bool at_vk_image_upload(at_vk_image         *image,
-                        VmaAllocator         allocator,
+                        at_vk_allocator     *allocator,
                         at_vk_upload        *upload,
                         const at_vk_context *context,
                         const void          *pixels) {
@@ -132,7 +137,7 @@ bool at_vk_image_upload(at_vk_image         *image,
         return false;
     }
     memcpy(staging.mapped, pixels, (size_t)size);
-    vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+    at_vk_buffer_flush(&staging, allocator, 0, VK_WHOLE_SIZE);
 
     VkCommandBuffer command_buffer = at_vk_upload_begin(upload, context);
     if (command_buffer == VK_NULL_HANDLE) {

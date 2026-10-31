@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 project(Archtype
     VERSION 0.1.0
     DESCRIPTION "A 2D/3D game engine written in C with Vulkan"
-    LANGUAGES C CXX # C++ is only needed to build VMA's implementation
+    LANGUAGES C # The engine is pure C; C++ is enabled only for the C++ example
 )
 
 # ---------------------------------------------------------------------------
@@ -21,6 +21,7 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+# Only used by the C++ example (examples/cpp)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -38,7 +39,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # MinGW: use the LLD linker when installed. GNU ld crashes when linking
 # the Vulkan code on some MinGW setups; LLD is compatible and faster.
 # Executables are linked statically, so they don't need the MinGW runtime
-# DLLs (libstdc++, libgcc, libwinpthread) to run.
+# DLLs (libgcc, libwinpthread, and libstdc++ for the C++ example) to run.
 if(MINGW)
     add_link_options(-static)
 
@@ -96,12 +97,6 @@ FetchContent_Declare(volk
 )
 FetchContent_MakeAvailable(volk)
 
-# VMA (Vulkan Memory Allocator): GPU memory for buffers and images
-FetchContent_Declare(vma
-    URL https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator/archive/refs/tags/v3.3.0.zip
-)
-FetchContent_MakeAvailable(vma)
-
 # stb_image: image loading for textures (single header, no CMake project).
 # Temporary: will be replaced by SDL3_image (ROADMAP 1.2.1).
 FetchContent_Declare(stb
@@ -134,14 +129,11 @@ add_library(archtype
     src/renderer/vulkan/vk_image.c
     src/renderer/vulkan/vk_swapchain.c
     src/renderer/vulkan/vk_upload.c
-    src/renderer/vulkan/vk_vma.cpp
 )
 add_library(Archtype::archtype ALIAS archtype)
 
-# VMA's and stb_image's implementations are third-party code: don't show
-# their warnings
+# stb_image's implementation is third-party code: don't show its warnings
 set(ARCHTYPE_THIRD_PARTY_SOURCES
-    src/renderer/vulkan/vk_vma.cpp
     src/renderer/stb_image_impl.c
 )
 if(MSVC)
@@ -163,7 +155,6 @@ target_link_libraries(archtype
     PRIVATE
         SDL3::SDL3-static
         volk::volk
-        GPUOpen::VulkanMemoryAllocator
 )
 
 # The math library uses <math.h>, which needs libm on Linux

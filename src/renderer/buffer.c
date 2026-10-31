@@ -18,7 +18,7 @@ static bool create_uniform_buffer(at_renderer *renderer, at_buffer *buffer,
 
     buffer->frame_stride = align_up(desc->size, alignment);
 
-    if (!at_vk_buffer_create_host(&buffer->buffer, renderer->allocator,
+    if (!at_vk_buffer_create_host(&buffer->buffer, &renderer->allocator,
                                   buffer->frame_stride * AT_VK_FRAMES_IN_FLIGHT,
                                   VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT)) {
         return false;
@@ -33,7 +33,7 @@ static bool create_uniform_buffer(at_renderer *renderer, at_buffer *buffer,
             memset(copy, 0, desc->size);
         }
     }
-    vmaFlushAllocation(renderer->allocator, buffer->buffer.allocation, 0, VK_WHOLE_SIZE);
+    at_vk_buffer_flush(&buffer->buffer, &renderer->allocator, 0, VK_WHOLE_SIZE);
     return true;
 }
 
@@ -42,14 +42,14 @@ static bool create_gpu_buffer(at_renderer *renderer, at_buffer *buffer,
     VkBufferUsageFlags usage = desc->type == AT_BUFFER_INDEX ? VK_BUFFER_USAGE_INDEX_BUFFER_BIT
                                                              : VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 
-    if (!at_vk_buffer_create_gpu(&buffer->buffer, renderer->allocator, desc->size, usage)) {
+    if (!at_vk_buffer_create_gpu(&buffer->buffer, &renderer->allocator, desc->size, usage)) {
         return false;
     }
 
     if (desc->data &&
-        !at_vk_buffer_upload(&buffer->buffer, renderer->allocator, &renderer->upload,
+        !at_vk_buffer_upload(&buffer->buffer, &renderer->allocator, &renderer->upload,
                              &renderer->context, desc->data, desc->size, 0)) {
-        at_vk_buffer_destroy(&buffer->buffer, renderer->allocator);
+        at_vk_buffer_destroy(&buffer->buffer, &renderer->allocator);
         return false;
     }
     return true;
@@ -102,15 +102,14 @@ bool at_buffer_update(at_renderer *renderer, at_buffer *buffer,
 
         VkDeviceSize frame_offset = buffer->frame_stride * at_renderer_frame_index(renderer);
         memcpy((uint8_t *)buffer->buffer.mapped + frame_offset + offset, data, size);
-        vmaFlushAllocation(renderer->allocator, buffer->buffer.allocation,
-                           frame_offset + offset, size);
+        at_vk_buffer_flush(&buffer->buffer, &renderer->allocator, frame_offset + offset, size);
         return true;
     }
 
     /* The GPU may be reading the buffer in a frame still in flight */
     vkDeviceWaitIdle(renderer->context.device);
 
-    return at_vk_buffer_upload(&buffer->buffer, renderer->allocator, &renderer->upload,
+    return at_vk_buffer_upload(&buffer->buffer, &renderer->allocator, &renderer->upload,
                                &renderer->context, data, size, offset);
 }
 
@@ -122,6 +121,6 @@ void at_buffer_destroy(at_renderer *renderer, at_buffer *buffer) {
     /* The GPU may still be reading this buffer */
     vkDeviceWaitIdle(renderer->context.device);
 
-    at_vk_buffer_destroy(&buffer->buffer, renderer->allocator);
+    at_vk_buffer_destroy(&buffer->buffer, &renderer->allocator);
     free(buffer);
 }

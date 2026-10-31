@@ -36,7 +36,7 @@ struct at_renderer {
     uint32_t           swapchain_height;
 
     at_vk_context      context;
-    VmaAllocator       allocator;
+    at_vk_allocator    allocator;
     at_vk_upload       upload;
     at_vk_swapchain    swapchain;
     at_vk_frames       frames;

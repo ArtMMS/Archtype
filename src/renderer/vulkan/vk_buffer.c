@@ -2,11 +2,11 @@
 
 #include <string.h>
 
-static bool create_buffer(at_vk_buffer            *buffer,
-                          VmaAllocator             allocator,
-                          VkDeviceSize             size,
-                          VkBufferUsageFlags       usage,
-                          VmaAllocationCreateFlags flags) {
+static bool create_buffer(at_vk_buffer       *buffer,
+                          at_vk_allocator    *allocator,
+                          VkDeviceSize        size,
+                          VkBufferUsageFlags  usage,
+                          at_vk_memory_usage  memory_usage) {
     memset(buffer, 0, sizeof(*buffer));
 
     VkBufferCreateInfo buffer_info;
@@ -16,53 +16,57 @@ static bool create_buffer(at_vk_buffer            *buffer,
     buffer_info.usage       = usage;
     buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    /* VMA_MEMORY_USAGE_AUTO picks the memory type from usage and flags */
-    VmaAllocationCreateInfo alloc_info;
-    memset(&alloc_info, 0, sizeof(alloc_info));
-    alloc_info.usage = VMA_MEMORY_USAGE_AUTO;
-    alloc_info.flags = flags;
-
-    VmaAllocationInfo allocation_info;
-    VkResult result = vmaCreateBuffer(allocator, &buffer_info, &alloc_info,
-                                      &buffer->handle, &buffer->allocation, &allocation_info);
+    VkResult result = vkCreateBuffer(allocator->device, &buffer_info, NULL, &buffer->handle);
     if (result != VK_SUCCESS) {
-        AT_VK_LOG_ERROR("vmaCreateBuffer", result);
+        AT_VK_LOG_ERROR("vkCreateBuffer", result);
+        memset(buffer, 0, sizeof(*buffer));
+        return false;
+    }
+
+    if (!at_vk_allocator_alloc_buffer(allocator, buffer->handle, memory_usage,
+                                      &buffer->allocation)) {
+        vkDestroyBuffer(allocator->device, buffer->handle, NULL);
         memset(buffer, 0, sizeof(*buffer));
         return false;
     }
 
     buffer->size   = size;
-    buffer->mapped = allocation_info.pMappedData;
+    buffer->mapped = buffer->allocation.mapped;
     return true;
 }
 
 bool at_vk_buffer_create_gpu(at_vk_buffer      *buffer,
-                             VmaAllocator       allocator,
+                             at_vk_allocator   *allocator,
                              VkDeviceSize       size,
                              VkBufferUsageFlags usage) {
     return create_buffer(buffer, allocator, size,
-                         usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
+                         usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, AT_VK_MEMORY_GPU);
 }
 
 bool at_vk_buffer_create_host(at_vk_buffer      *buffer,
-                              VmaAllocator       allocator,
+                              at_vk_allocator   *allocator,
                               VkDeviceSize       size,
                               VkBufferUsageFlags usage) {
-    /* Sequential write: the CPU only writes (memcpy), never reads back */
-    return create_buffer(buffer, allocator, size, usage,
-                         VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
-                       | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+    return create_buffer(buffer, allocator, size, usage, AT_VK_MEMORY_CPU_TO_GPU);
 }
 
-void at_vk_buffer_destroy(at_vk_buffer *buffer, VmaAllocator allocator) {
+void at_vk_buffer_destroy(at_vk_buffer *buffer, at_vk_allocator *allocator) {
     if (buffer->handle != VK_NULL_HANDLE) {
-        vmaDestroyBuffer(allocator, buffer->handle, buffer->allocation);
+        vkDestroyBuffer(allocator->device, buffer->handle, NULL);
     }
+    at_vk_allocator_free(allocator, &buffer->allocation);
     memset(buffer, 0, sizeof(*buffer));
 }
 
+void at_vk_buffer_flush(at_vk_buffer    *buffer,
+                        at_vk_allocator *allocator,
+                        VkDeviceSize     offset,
+                        VkDeviceSize     size) {
+    at_vk_allocator_flush(allocator, &buffer->allocation, offset, size);
+}
+
 bool at_vk_buffer_upload(at_vk_buffer        *buffer,
-                         VmaAllocator         allocator,
+                         at_vk_allocator     *allocator,
                          at_vk_upload        *upload,
                          const at_vk_context *context,
                          const void          *data,
@@ -76,7 +80,7 @@ bool at_vk_buffer_upload(at_vk_buffer        *buffer,
     }
 
     memcpy(staging.mapped, data, (size_t)size);
-    vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+    at_vk_buffer_flush(&staging, allocator, 0, VK_WHOLE_SIZE);
 
     /* 2. Let the GPU copy it into fast GPU memory */
     VkCommandBuffer command_buffer = at_vk_upload_begin(upload, context);

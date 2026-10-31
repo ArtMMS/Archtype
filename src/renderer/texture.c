@@ -78,10 +78,10 @@ at_texture *at_texture_create(at_renderer *renderer, uint32_t width, uint32_t he
         return NULL;
     }
 
-    bool ok = at_vk_image_create(&texture->image, renderer->allocator, &renderer->context,
+    bool ok = at_vk_image_create(&texture->image, &renderer->allocator, &renderer->context,
                                  width, height, to_vk_format(options->color_space),
                                  VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
-           && at_vk_image_upload(&texture->image, renderer->allocator, &renderer->upload,
+           && at_vk_image_upload(&texture->image, &renderer->allocator, &renderer->upload,
                                  &renderer->context, pixels)
            && create_sampler(renderer, texture, options);
 
@@ -135,6 +135,6 @@ void at_texture_destroy(at_renderer *renderer, at_texture *texture) {
     if (texture->sampler != VK_NULL_HANDLE) {
         vkDestroySampler(renderer->context.device, texture->sampler, NULL);
     }
-    at_vk_image_destroy(&texture->image, renderer->allocator, &renderer->context);
+    at_vk_image_destroy(&texture->image, &renderer->allocator, &renderer->context);
     free(texture);
 }

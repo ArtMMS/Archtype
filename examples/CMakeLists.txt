@@ -1,3 +1,6 @@
+# C++ is only used here, to check that the engine's C headers work from C++
+enable_language(CXX)
+
 # C example
 add_executable(hello_c c/hello/main.c)
 target_link_libraries(hello_c PRIVATE Archtype::archtype)
