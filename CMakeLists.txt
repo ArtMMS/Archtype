@@ -6,6 +6,9 @@ project(Archtype
     LANGUAGES C
 )
 
+# Export compile commands for tooling such as clangd.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # ---------------------------------------------------------------------------
 # Options
 # ---------------------------------------------------------------------------
