@@ -1,13 +1,11 @@
-# C++ is only used here, to check that the engine's C headers work from C++
-enable_language(CXX)
-
 # C example
 add_executable(hello_c c/hello/main.c)
 target_link_libraries(hello_c PRIVATE Archtype::archtype)
 
-# C++ example (uses the same C headers through extern "C")
-add_executable(hello_cpp cpp/hello/main.cpp)
-target_link_libraries(hello_cpp PRIVATE Archtype::archtype)
+option(ARCHTYPE_BUILD_CPP_EXAMPLE "Build the optional C++ example" OFF)
+if(ARCHTYPE_BUILD_CPP_EXAMPLE)
+    add_subdirectory(cpp)
+endif()
 
 # Window and main loop example
 add_executable(window_c c/window/main.c)
