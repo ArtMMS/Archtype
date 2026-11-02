@@ -9,6 +9,5 @@ int main() {
     std::cout << "Archtype " << at_get_version_string()
               << " (" << version.major << '.' << version.minor << '.'
               << version.patch << ")\n";
-
     return 0;
 }

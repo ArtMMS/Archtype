@@ -37,7 +37,7 @@ cmake --build build
 
 ### Language and API
 
-- **C11** | The engine is written in C11. Its public headers are wrapped in `extern "C"`, so games can be written in **C** or **C++**. **Lua** support is planned through bindings.
+- **C99** | The engine is implemented in C99. Its public API supports C++ projects through C-compatible headers. An optional C++ example can be enabled with `-DARCHTYPE_BUILD_CPP_EXAMPLE=ON`; it is excluded from the default build. **Lua** support is planned through bindings.
 - **Vulkan 1.3** | Graphics API. The renderer uses Vulkan 1.3 features: **dynamic rendering** (no render pass or framebuffer objects) and **synchronization2** (simpler barriers and queue submits).
 
 ### Build
