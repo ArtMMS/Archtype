@@ -3,11 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 project(Archtype
     VERSION 0.1.0
     DESCRIPTION "A 2D/3D game engine written in C with Vulkan"
-    LANGUAGES C
+    LANGUAGES C # The engine is pure C; C++ is enabled only for the C++ example
 )
-
-# Export compile commands for tooling such as clangd.
-set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # ---------------------------------------------------------------------------
 # Options
@@ -24,6 +21,11 @@ set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
+# Only used by the C++ example (examples/cpp)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Default to Debug for single-config generators (Makefiles, Ninja)
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -37,7 +39,7 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 # MinGW: use the LLD linker when installed. GNU ld crashes when linking
 # the Vulkan code on some MinGW setups; LLD is compatible and faster.
 # Executables are linked statically, so they don't need the MinGW runtime
-# DLLs (libgcc and libwinpthread) to run.
+# DLLs (libgcc, libwinpthread, and libstdc++ for the C++ example) to run.
 if(MINGW)
     add_link_options(-static)
 
@@ -132,6 +134,7 @@ add_library(archtype
     src/platform/platform.c
     src/platform/window.c
     src/renderer/buffer.c
+    src/renderer/camera2d.c
     src/renderer/image_loader.c
     src/renderer/pipeline.c
     src/renderer/renderer.c

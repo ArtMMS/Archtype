@@ -20,6 +20,10 @@ static bool near_f(float a, float b) {
     return at_nearly_equalf(a, b, TEST_EPSILON);
 }
 
+static bool near_vec2(at_vec2 a, at_vec2 b) {
+    return near_f(a.x, b.x) && near_f(a.y, b.y);
+}
+
 static bool near_vec3(at_vec3 a, at_vec3 b) {
     return near_f(a.x, b.x) && near_f(a.y, b.y) && near_f(a.z, b.z);
 }
@@ -154,6 +158,47 @@ static void test_transform(void) {
     CHECK(near_vec3(at_transform_forward(t), at_vec3_make(-1.0f, 0.0f, 0.0f)));
 }
 
+static void test_camera2d(void) {
+    const float w = 800.0f;
+    const float h = 600.0f;
+
+    /* Default camera: the screen center is the world origin, +Y is up */
+    at_camera2d camera = at_camera2d_make();
+    CHECK(near_vec2(at_camera2d_screen_to_world(&camera, at_vec2_make(400.0f, 300.0f), w, h),
+                    at_vec2_zero()));
+    CHECK(near_vec2(at_camera2d_screen_to_world(&camera, at_vec2_make(400.0f, 200.0f), w, h),
+                    at_vec2_make(0.0f, 100.0f)));
+
+    /* Moved, zoomed and turned camera: its position is still at the center */
+    camera.position = at_vec2_make(120.0f, -45.0f);
+    camera.zoom     = 2.5f;
+    camera.rotation = 0.7f;
+    CHECK(near_vec2(at_camera2d_screen_to_world(&camera, at_vec2_make(400.0f, 300.0f), w, h),
+                    camera.position));
+
+    /* screen -> world -> screen gives the same point back */
+    at_vec2 screen = at_vec2_make(123.0f, 456.0f);
+    at_vec2 world  = at_camera2d_screen_to_world(&camera, screen, w, h);
+    CHECK(near_vec2(at_camera2d_world_to_screen(&camera, world, w, h), screen));
+
+    /* The matrix puts a world point where world_to_screen says, in clip */
+    /* space (Vulkan: -1..1 from the top-left corner).                   */
+    at_mat4 view_projection = at_camera2d_view_projection(&camera, w, h);
+    at_vec2 point           = at_vec2_make(-30.0f, 75.0f);
+    at_vec2 on_screen       = at_camera2d_world_to_screen(&camera, point, w, h);
+    at_vec4 clip = at_mat4_mul_vec4(view_projection, at_vec4_make(point.x, point.y, 0.0f, 1.0f));
+    CHECK(near_f(clip.x / clip.w, on_screen.x / w * 2.0f - 1.0f));
+    CHECK(near_f(clip.y / clip.w, on_screen.y / h * 2.0f - 1.0f));
+    CHECK(clip.z / clip.w >= 0.0f && clip.z / clip.w <= 1.0f);
+
+    /* Zooming at a point keeps the world point under it */
+    at_vec2 mouse = at_vec2_make(650.0f, 120.0f);
+    at_vec2 under = at_camera2d_screen_to_world(&camera, mouse, w, h);
+    at_camera2d_zoom_at(&camera, mouse, 1.5f, w, h);
+    CHECK(near_f(camera.zoom, 3.75f));
+    CHECK(near_vec2(at_camera2d_screen_to_world(&camera, mouse, w, h), under));
+}
+
 int main(void) {
     test_scalar();
     test_vec();
@@ -161,6 +206,7 @@ int main(void) {
     test_camera();
     test_quat();
     test_transform();
+    test_camera2d();
 
     if (s_failures > 0) {
         printf("%d of %d checks failed\n", s_failures, s_checks);

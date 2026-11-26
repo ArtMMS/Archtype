@@ -1,11 +1,13 @@
+# C++ is only used here, to check that the engine's C headers work from C++
+enable_language(CXX)
+
 # C example
 add_executable(hello_c c/hello/main.c)
 target_link_libraries(hello_c PRIVATE Archtype::archtype)
 
-option(ARCHTYPE_BUILD_CPP_EXAMPLE "Build the optional C++ example" OFF)
-if(ARCHTYPE_BUILD_CPP_EXAMPLE)
-    add_subdirectory(cpp)
-endif()
+# C++ example (uses the same C headers through extern "C")
+add_executable(hello_cpp cpp/hello/main.cpp)
+target_link_libraries(hello_cpp PRIVATE Archtype::archtype)
 
 # Window and main loop example
 add_executable(window_c c/window/main.c)
@@ -58,3 +60,11 @@ archtype_add_shaders(texture_c
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/c/texture/image.png")
     archtype_add_assets(texture_c textures c/texture/image.png)
 endif()
+
+# 2D camera: orthographic projection, drag to move, mouse wheel to zoom
+add_executable(camera2d_c c/camera2d/main.c)
+target_link_libraries(camera2d_c PRIVATE Archtype::archtype)
+archtype_add_shaders(camera2d_c
+    c/camera2d/camera2d.vert
+    c/camera2d/camera2d.frag
+)

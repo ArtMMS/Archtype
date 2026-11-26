@@ -23,6 +23,8 @@ struct at_window {
     float       mouse_y;
     bool        mouse_down[AT_MOUSE_BUTTON_COUNT];
     uint64_t    mouse_pressed_batch[AT_MOUSE_BUTTON_COUNT]; /* Event batch of the last press */
+    float       mouse_wheel;       /* Wheel turned during mouse_wheel_batch */
+    uint64_t    mouse_wheel_batch;
 };
 
 /* ------------------------------------------------------------------------ */
@@ -103,6 +105,31 @@ void at_window_handle_event(const SDL_Event *event) {
                 window->mouse_pressed_batch[index] = at_platform_event_batch();
             }
             set_mouse_position(window, event->button.x, event->button.y);
+            break;
+        }
+
+        case SDL_EVENT_MOUSE_WHEEL: {
+            window = find_window(event->wheel.windowID);
+            if (!window) {
+                break;
+            }
+
+            /* First wheel event of this batch: forget the previous batch */
+            uint64_t batch = at_platform_event_batch();
+            if (window->mouse_wheel_batch != batch) {
+                window->mouse_wheel       = 0.0f;
+                window->mouse_wheel_batch = batch;
+            }
+
+            /* "Natural scrolling" flips the values: undo it, so positive */
+            /* always means scrolling up                                  */
+            float amount = event->wheel.y;
+            if (event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED) {
+                amount = -amount;
+            }
+            window->mouse_wheel += amount;
+
+            set_mouse_position(window, event->wheel.mouse_x, event->wheel.mouse_y);
             break;
         }
 
@@ -222,6 +249,11 @@ bool at_window_is_mouse_button_down(const at_window *window, at_mouse_button but
     uint64_t pressed = window->mouse_pressed_batch[index];
     return window->mouse_down[index]
         || (pressed != 0 && pressed == at_platform_event_batch());
+}
+
+float at_window_get_mouse_wheel(const at_window *window) {
+    /* Only the wheel turned in the latest batch of events counts */
+    return window->mouse_wheel_batch == at_platform_event_batch() ? window->mouse_wheel : 0.0f;
 }
 
 /* ------------------------------------------------------------------------ */

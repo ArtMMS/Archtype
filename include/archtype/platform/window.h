@@ -58,6 +58,12 @@ AT_API void at_window_get_mouse_position(const at_window *window, float *x, floa
 /* Returns true while the mouse button is held down. */
 AT_API bool at_window_is_mouse_button_down(const at_window *window, at_mouse_button button);
 
+/* Returns how far the mouse wheel turned during the last batch of events    */
+/* (the last at_platform_poll_events or at_platform_wait_events), or 0.     */
+/* Positive is away from the user (scroll up), negative is toward the user. */
+/* One notch of a regular wheel is usually 1; touchpads give smaller steps. */
+AT_API float at_window_get_mouse_wheel(const at_window *window);
+
 AT_EXTERN_C_END
 
 #endif /* ARCHTYPE_PLATFORM_WINDOW_H */
