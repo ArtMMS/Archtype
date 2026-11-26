@@ -295,6 +295,7 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
     at_vk_descriptors_reset(&renderer->descriptors, &renderer->context,
                             at_renderer_frame_index(renderer));
 
+    renderer->frame_number++;
     renderer->frame_started = true;
     reset_frame_state(renderer);
     set_viewport_and_scissor(renderer);

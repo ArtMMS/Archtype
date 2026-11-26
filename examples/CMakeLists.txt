@@ -68,3 +68,8 @@ archtype_add_shaders(camera2d_c
     c/camera2d/camera2d.vert
     c/camera2d/camera2d.frag
 )
+
+# 2D renderer: rectangles, circles, triangles and lines in a few draw calls.
+# Uses the engine's built-in shaders, so there are no shaders to compile here.
+add_executable(shapes2d_c c/shapes2d/main.c)
+target_link_libraries(shapes2d_c PRIVATE Archtype::archtype)

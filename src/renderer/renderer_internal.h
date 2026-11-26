@@ -23,6 +23,10 @@ struct at_renderer {
     bool               vsync;
     float              clear_color[4]; /* sRGB, as given by the user */
 
+    /* Frames started so far (0 before the first one). Lets other parts of */
+    /* the renderer notice that a new frame began.                         */
+    uint64_t           frame_number;
+
     /* Per-frame state, reset by begin_frame */
     bool               frame_started;
     at_pipeline       *bound_pipeline;

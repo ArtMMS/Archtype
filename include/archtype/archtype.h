@@ -16,7 +16,9 @@
 #include "archtype/platform/window.h"
 
 #include "archtype/renderer/renderer.h"
+#include "archtype/renderer/color.h"
 #include "archtype/renderer/camera2d.h"
+#include "archtype/renderer/renderer2d.h"
 #include "archtype/renderer/buffer.h"
 #include "archtype/renderer/texture.h"
 #include "archtype/renderer/shader.h"

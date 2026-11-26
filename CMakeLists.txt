@@ -138,6 +138,7 @@ add_library(archtype
     src/renderer/image_loader.c
     src/renderer/pipeline.c
     src/renderer/renderer.c
+    src/renderer/renderer2d.c
     src/renderer/shader.c
     src/renderer/texture.c
     src/renderer/vulkan/vk_allocator.c
@@ -152,6 +153,12 @@ add_library(archtype
     src/renderer/vulkan/vk_upload.c
 )
 add_library(Archtype::archtype ALIAS archtype)
+
+# Engine shaders (2D renderer...), compiled into the library as C arrays
+archtype_embed_shaders(archtype
+    src/renderer/shaders/renderer2d.vert
+    src/renderer/shaders/renderer2d.frag
+)
 
 target_include_directories(archtype
     PUBLIC
