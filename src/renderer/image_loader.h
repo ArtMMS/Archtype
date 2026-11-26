@@ -1,9 +1,9 @@
 #ifndef ARCHTYPE_RENDERER_IMAGE_LOADER_H
 #define ARCHTYPE_RENDERER_IMAGE_LOADER_H
 
-/* Decodes image files (PNG, JPG, BMP, TGA...) into RGBA8 pixels.     */
-/* This is the only file that knows which image library is used       */
-/* (stb_image for now). Not part of the public API.                   */
+/* Decodes image files (PNG, JPG, BMP, TGA, GIF, QOI...) into RGBA8 pixels. */
+/* This is the only file that knows which image library is used            */
+/* (SDL3_image). Not part of the public API.                               */
 
 #include "archtype/core/defines.h"
 

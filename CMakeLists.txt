@@ -81,6 +81,34 @@ FetchContent_Declare(SDL3
 )
 FetchContent_MakeAvailable(SDL3)
 
+# SDL3_image: decodes image files (PNG, JPG, BMP, TGA, GIF, QOI...) for
+# textures. PNG and JPG use its built-in decoders (the stb backend), so no
+# libpng or libjpeg is needed. Formats that need extra libraries (AVIF, JXL,
+# TIFF, WebP) are turned off: their sources are git submodules, which the
+# release archive does not include.
+set(SDLIMAGE_VENDORED    OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_DEPS_SHARED OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_BACKEND_STB ON  CACHE BOOL "" FORCE)
+set(SDLIMAGE_PNG_LIBPNG  OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_AVIF        OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_JXL         OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TIF         OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_WEBP        OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_SAMPLES     OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_TESTS       OFF CACHE BOOL "" FORCE)
+set(SDLIMAGE_INSTALL     OFF CACHE BOOL "" FORCE)
+
+FetchContent_Declare(SDL3_image
+    URL https://github.com/libsdl-org/SDL_image/archive/refs/tags/release-3.4.6.zip
+)
+
+# SDL3_image follows BUILD_SHARED_LIBS: force a static library, like SDL3,
+# then restore the project's setting.
+set(ARCHTYPE_SAVED_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+FetchContent_MakeAvailable(SDL3_image)
+set(BUILD_SHARED_LIBS ${ARCHTYPE_SAVED_BUILD_SHARED_LIBS})
+
 # Vulkan SDK: headers, validation layers and the glslc shader compiler
 # (found through the VULKAN_SDK environment variable)
 find_package(Vulkan REQUIRED COMPONENTS glslc)
@@ -95,13 +123,6 @@ FetchContent_Declare(volk
 )
 FetchContent_MakeAvailable(volk)
 
-# stb_image: image loading for textures (single header, no CMake project).
-# Temporary: will be replaced by SDL3_image (ROADMAP 1.2.1).
-FetchContent_Declare(stb
-    URL https://github.com/nothings/stb/archive/013ac3beddff3dbffafd5177e7972067cd2b5083.zip
-)
-FetchContent_MakeAvailable(stb)
-
 # ---------------------------------------------------------------------------
 # Engine library
 # ---------------------------------------------------------------------------
@@ -115,7 +136,6 @@ add_library(archtype
     src/renderer/pipeline.c
     src/renderer/renderer.c
     src/renderer/shader.c
-    src/renderer/stb_image_impl.c
     src/renderer/texture.c
     src/renderer/vulkan/vk_allocator.c
     src/renderer/vulkan/vk_buffer.c
@@ -130,27 +150,17 @@ add_library(archtype
 )
 add_library(Archtype::archtype ALIAS archtype)
 
-# stb_image's implementation is third-party code: don't show its warnings
-set(ARCHTYPE_THIRD_PARTY_SOURCES
-    src/renderer/stb_image_impl.c
-)
-if(MSVC)
-    set_source_files_properties(${ARCHTYPE_THIRD_PARTY_SOURCES} PROPERTIES COMPILE_OPTIONS "/w")
-else()
-    set_source_files_properties(${ARCHTYPE_THIRD_PARTY_SOURCES} PROPERTIES COMPILE_OPTIONS "-w")
-endif()
-
 target_include_directories(archtype
     PUBLIC
         $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
-        ${stb_SOURCE_DIR}
 )
 
 target_link_libraries(archtype
     PRIVATE
+        SDL3_image::SDL3_image-static
         SDL3::SDL3-static
         volk::volk
 )
