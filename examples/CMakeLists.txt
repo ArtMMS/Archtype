@@ -93,3 +93,8 @@ target_link_libraries(atlas2d_c PRIVATE Archtype::archtype)
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/c/texture/image.png")
     archtype_add_assets(atlas2d_c textures c/texture/image.png)
 endif()
+
+# Batching stress test: thousands of sprites, draw calls with an atlas
+# versus one texture per image
+add_executable(stress2d_c c/stress2d/main.c)
+target_link_libraries(stress2d_c PRIVATE Archtype::archtype)

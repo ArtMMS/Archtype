@@ -32,7 +32,11 @@ typedef struct at_vertex2d {
     uint8_t color[4]; /* sRGB, 0..255 */
 } at_vertex2d;
 
-/* A run of vertices drawn with the same state, waiting for end to be */
+/* Index buffer capacity: indices per vertex of max_vertices. Quads use */
+/* 1.5, triangles 1, circles almost 3, so 2 covers almost every scene.  */
+#define AT_INDICES_PER_VERTEX 2
+
+/* A run of geometry drawn with the same state, waiting for end to be */
 /* sorted. Consecutive draws with the same state share one item.      */
 typedef struct at_draw_item2d {
     int32_t     layer;
@@ -41,39 +45,55 @@ typedef struct at_draw_item2d {
     uint32_t    blend_mode;
     uint32_t    first_vertex; /* In staged_vertices */
     uint32_t    vertex_count;
+    uint32_t    first_index;  /* In staged_indices  */
+    uint32_t    index_count;
 } at_draw_item2d;
 
-struct at_renderer2d {
-    at_renderer    *renderer;
-    at_pipeline    *pipelines[AT_BLEND_MODE_COUNT];
-    at_texture     *white_texture; /* Lets shapes use the same shader as sprites */
-    uint32_t        max_vertices;
+/* Room taken for one shape or sprite: write the vertices, then the */
+/* indices as base + 0, base + 1...                                  */
+typedef struct at_geometry2d {
+    at_vertex2d *vertices;
+    uint32_t    *indices;
+    uint32_t     base; /* Number of the first vertex, for the indices */
+} at_geometry2d;
 
-    /* GPU vertex buffers, one per frame in flight: the CPU fills one while */
-    /* the GPU reads the other. Several begin/end pairs in a frame append   */
-    /* to the same buffer.                                                  */
-    at_vk_buffer    vertex_buffers[AT_VK_FRAMES_IN_FLIGHT];
-    uint64_t        frame_number;       /* Renderer frame the count belongs to */
-    uint32_t        frame_vertex_count; /* Vertices sent this frame            */
+struct at_renderer2d {
+    at_renderer        *renderer;
+    at_pipeline        *pipelines[AT_BLEND_MODE_COUNT];
+    at_texture         *white_texture; /* Lets shapes use the same shader as sprites */
+    uint32_t            max_vertices;
+    uint32_t            max_indices;
+
+    /* GPU buffers, one pair per frame in flight: the CPU fills one while */
+    /* the GPU reads the other. Several begin/end pairs in a frame append */
+    /* to the same buffers.                                               */
+    at_vk_buffer        vertex_buffers[AT_VK_FRAMES_IN_FLIGHT];
+    at_vk_buffer        index_buffers[AT_VK_FRAMES_IN_FLIGHT];
+    uint64_t            frame_number;       /* Renderer frame the counts belong to */
+    uint32_t            frame_vertex_count; /* Vertices sent this frame            */
+    uint32_t            frame_index_count;  /* Indices sent this frame             */
+    at_renderer2d_stats stats;              /* This frame so far                   */
 
     /* Drawn since begin, waiting for end: CPU memory, in draw order */
-    at_vertex2d    *staged_vertices;
-    uint32_t        staged_vertex_count;
-    at_draw_item2d *items;
-    uint32_t        item_count;
-    uint32_t        max_items;
-    bool            needs_sort; /* An item went below the layer of the one before */
+    at_vertex2d        *staged_vertices;
+    uint32_t           *staged_indices; /* Point into staged_vertices */
+    uint32_t            staged_vertex_count;
+    uint32_t            staged_index_count;
+    at_draw_item2d     *items;
+    uint32_t            item_count;
+    uint32_t            max_items;
+    bool                needs_sort; /* An item went below the layer of the one before */
 
     /* Draw state, reset by begin */
-    int32_t         layer;
-    at_blend_mode   blend_mode;
+    int32_t             layer;
+    at_blend_mode       blend_mode;
 
     /* Between begin and end */
-    bool            active;
-    bool            inactive_warned;
-    bool            full_warned; /* "Buffer full" is only reported once */
-    at_mat4         view_projection;
-    float           zoom;
+    bool                active;
+    bool                inactive_warned;
+    bool                full_warned; /* "Buffer full" is only reported once */
+    at_mat4             view_projection;
+    float               zoom;
 };
 
 /* ------------------------------------------------------------------------ */
@@ -103,23 +123,26 @@ static void pack_color(at_color color, uint8_t out[4]) {
     out[3] = to_byte(color.a);
 }
 
-/* Takes room for count vertices drawn with texture and the current layer */
-/* and blend mode. Returns NULL (and the drawing is skipped) outside      */
-/* begin/end or when the frame's vertices are used up.                    */
-static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count,
-                                     at_texture *texture) {
+/* Takes room for one shape or sprite of vertex_count vertices and        */
+/* index_count indices, drawn with texture and the current layer and      */
+/* blend mode. Returns false (and the drawing is skipped) outside         */
+/* begin/end or when the frame's room is used up.                         */
+static bool reserve(at_renderer2d *renderer2d, uint32_t vertex_count, uint32_t index_count,
+                    at_texture *texture, at_geometry2d *out) {
     if (!renderer2d->active) {
         if (!renderer2d->inactive_warned) {
             fprintf(stderr, "[archtype] 2D shapes and sprites must be drawn between "
                             "at_renderer2d_begin and at_renderer2d_end\n");
             renderer2d->inactive_warned = true;
         }
-        return NULL;
+        return false;
     }
 
     /* Room left this frame, counting what earlier begin/end pairs sent */
-    uint32_t room = renderer2d->max_vertices - renderer2d->frame_vertex_count
-                  - renderer2d->staged_vertex_count;
+    uint32_t vertex_room = renderer2d->max_vertices - renderer2d->frame_vertex_count
+                         - renderer2d->staged_vertex_count;
+    uint32_t index_room  = renderer2d->max_indices - renderer2d->frame_index_count
+                         - renderer2d->staged_index_count;
 
     at_draw_item2d *last  = renderer2d->item_count > 0
                           ? &renderer2d->items[renderer2d->item_count - 1] : NULL;
@@ -127,19 +150,22 @@ static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count,
                          && last->texture == texture
                          && last->blend_mode == (uint32_t)renderer2d->blend_mode;
 
-    if (count > room || (!joins && renderer2d->item_count == renderer2d->max_items)) {
+    if (vertex_count > vertex_room || index_count > index_room ||
+        (!joins && renderer2d->item_count == renderer2d->max_items)) {
+        renderer2d->stats.skipped++;
         if (!renderer2d->full_warned) {
             fprintf(stderr, "[archtype] 2D renderer is full (%u vertices per frame): "
                             "drawing skipped. Raise at_renderer2d_desc.max_vertices\n",
                     renderer2d->max_vertices);
             renderer2d->full_warned = true;
         }
-        return NULL;
+        return false;
     }
 
     if (joins) {
         /* Same state as the draw before: just make its run longer */
-        last->vertex_count += count;
+        last->vertex_count += vertex_count;
+        last->index_count  += index_count;
     } else {
         at_draw_item2d *item = &renderer2d->items[renderer2d->item_count];
         item->layer        = renderer2d->layer;
@@ -147,7 +173,9 @@ static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count,
         item->texture      = texture;
         item->blend_mode   = (uint32_t)renderer2d->blend_mode;
         item->first_vertex = renderer2d->staged_vertex_count;
-        item->vertex_count = count;
+        item->vertex_count = vertex_count;
+        item->first_index  = renderer2d->staged_index_count;
+        item->index_count  = index_count;
 
         if (last && item->layer < last->layer) {
             renderer2d->needs_sort = true;
@@ -155,9 +183,14 @@ static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count,
         renderer2d->item_count++;
     }
 
-    at_vertex2d *vertices = &renderer2d->staged_vertices[renderer2d->staged_vertex_count];
-    renderer2d->staged_vertex_count += count;
-    return vertices;
+    out->vertices = &renderer2d->staged_vertices[renderer2d->staged_vertex_count];
+    out->indices  = &renderer2d->staged_indices[renderer2d->staged_index_count];
+    out->base     = renderer2d->staged_vertex_count;
+
+    renderer2d->staged_vertex_count += vertex_count;
+    renderer2d->staged_index_count  += index_count;
+    renderer2d->stats.primitives++;
+    return true;
 }
 
 /* Lower layers first; in the same layer, the order they were drawn in */
@@ -171,24 +204,31 @@ static int compare_items(const void *a, const void *b) {
     return x->sequence < y->sequence ? -1 : (x->sequence > y->sequence ? 1 : 0);
 }
 
-/* One draw call: vertex_count vertices from first_vertex in the GPU buffer */
-static void draw_batch(at_renderer2d *renderer2d, at_vk_buffer *buffer, at_texture *texture,
-                       uint32_t blend_mode, uint32_t first_vertex, uint32_t vertex_count) {
-    at_renderer *renderer = renderer2d->renderer;
-    VkDeviceSize offset   = (VkDeviceSize)first_vertex * sizeof(at_vertex2d);
+/* One draw call: index_count indices from first_index in this frame's */
+/* index buffer (the indices point into the whole vertex buffer).      */
+static void draw_batch(at_renderer2d *renderer2d, at_vk_buffer *index_buffer,
+                       at_texture *texture, uint32_t blend_mode,
+                       uint32_t first_index, uint32_t index_count) {
+    at_renderer    *renderer       = renderer2d->renderer;
+    VkCommandBuffer command_buffer = at_renderer_command_buffer(renderer);
+    VkDeviceSize    offset         = (VkDeviceSize)first_index * sizeof(uint32_t);
 
     at_renderer_bind_pipeline(renderer, renderer2d->pipelines[blend_mode]);
     at_renderer_bind_texture(renderer, 0, texture);
     at_renderer_push_constants(renderer, &renderer2d->view_projection, sizeof(at_mat4));
 
-    /* The batch starts in the middle of the buffer: bind it at an offset */
-    vkCmdBindVertexBuffers(at_renderer_command_buffer(renderer), 0, 1, &buffer->handle, &offset);
-    at_renderer_draw(renderer, vertex_count);
+    /* The batch starts in the middle of the index buffer: bind it at an  */
+    /* offset, and tell the renderer an index buffer is bound.            */
+    vkCmdBindIndexBuffer(command_buffer, index_buffer->handle, offset, VK_INDEX_TYPE_UINT32);
+    renderer->index_buffer_bound = true;
+    at_renderer_draw_indexed(renderer, index_count);
+
+    renderer2d->stats.draw_calls++;
 }
 
-/* Sorts the staged items, copies their vertices to this frame's GPU buffer */
-/* in that order and draws them, one draw call per run of the same texture  */
-/* and blend mode.                                                          */
+/* Sorts the staged items, copies their vertices and indices to this    */
+/* frame's GPU buffers in that order and draws them, one draw call per  */
+/* run of the same texture and blend mode.                              */
 static void submit(at_renderer2d *renderer2d) {
     if (renderer2d->item_count == 0) {
         return;
@@ -199,27 +239,52 @@ static void submit(at_renderer2d *renderer2d) {
               compare_items);
     }
 
-    at_renderer  *renderer = renderer2d->renderer;
-    at_vk_buffer *buffer   = &renderer2d->vertex_buffers[at_renderer_frame_index(renderer)];
-    at_vertex2d  *gpu      = (at_vertex2d *)buffer->mapped;
-    uint32_t      start    = renderer2d->frame_vertex_count;
-    uint32_t      write    = start;
+    at_renderer  *renderer      = renderer2d->renderer;
+    uint32_t      frame         = at_renderer_frame_index(renderer);
+    at_vk_buffer *vertex_buffer = &renderer2d->vertex_buffers[frame];
+    at_vk_buffer *index_buffer  = &renderer2d->index_buffers[frame];
+    at_vertex2d  *gpu_vertices  = (at_vertex2d *)vertex_buffer->mapped;
+    uint32_t     *gpu_indices   = (uint32_t *)index_buffer->mapped;
 
-    /* 1. Copy every item's vertices, in sorted order, after what earlier */
-    /*    begin/end pairs of this frame already sent.                     */
+    uint32_t first_vertex = renderer2d->frame_vertex_count;
+    uint32_t first_index  = renderer2d->frame_index_count;
+    uint32_t vertex_write = first_vertex;
+    uint32_t index_write  = first_index;
+
+    /* 1. Copy every item, in sorted order, after what earlier begin/end */
+    /*    pairs of this frame already sent. Its indices are moved to     */
+    /*    where its vertices land in the GPU buffer.                     */
     for (uint32_t i = 0; i < renderer2d->item_count; ++i) {
         const at_draw_item2d *item = &renderer2d->items[i];
-        memcpy(&gpu[write], &renderer2d->staged_vertices[item->first_vertex],
+
+        memcpy(&gpu_vertices[vertex_write], &renderer2d->staged_vertices[item->first_vertex],
                (size_t)item->vertex_count * sizeof(at_vertex2d));
-        write += item->vertex_count;
+
+        const uint32_t *staged = &renderer2d->staged_indices[item->first_index];
+        uint32_t       *dst    = &gpu_indices[index_write];
+        for (uint32_t j = 0; j < item->index_count; ++j) {
+            dst[j] = staged[j] - item->first_vertex + vertex_write;
+        }
+
+        vertex_write += item->vertex_count;
+        index_write  += item->index_count;
     }
 
     /* Make the CPU writes visible to the GPU (no-op on coherent memory) */
-    at_vk_buffer_flush(buffer, &renderer->allocator, (VkDeviceSize)start * sizeof(at_vertex2d),
-                       (VkDeviceSize)(write - start) * sizeof(at_vertex2d));
+    at_vk_buffer_flush(vertex_buffer, &renderer->allocator,
+                       (VkDeviceSize)first_vertex * sizeof(at_vertex2d),
+                       (VkDeviceSize)(vertex_write - first_vertex) * sizeof(at_vertex2d));
+    at_vk_buffer_flush(index_buffer, &renderer->allocator,
+                       (VkDeviceSize)first_index * sizeof(uint32_t),
+                       (VkDeviceSize)(index_write - first_index) * sizeof(uint32_t));
 
-    /* 2. Draw: neighbours with the same texture and blend mode are one batch */
-    uint32_t    batch_start   = start;
+    /* 2. Draw: the whole vertex buffer stays bound; neighbours with the  */
+    /*    same texture and blend mode are one batch.                      */
+    VkDeviceSize no_offset = 0;
+    vkCmdBindVertexBuffers(at_renderer_command_buffer(renderer), 0, 1, &vertex_buffer->handle,
+                           &no_offset);
+
+    uint32_t    batch_start   = first_index;
     uint32_t    batch_count   = 0;
     at_texture *batch_texture = renderer2d->items[0].texture;
     uint32_t    batch_blend   = renderer2d->items[0].blend_mode;
@@ -228,17 +293,21 @@ static void submit(at_renderer2d *renderer2d) {
         const at_draw_item2d *item = &renderer2d->items[i];
 
         if (item->texture != batch_texture || item->blend_mode != batch_blend) {
-            draw_batch(renderer2d, buffer, batch_texture, batch_blend, batch_start, batch_count);
+            draw_batch(renderer2d, index_buffer, batch_texture, batch_blend,
+                       batch_start, batch_count);
             batch_start  += batch_count;
             batch_count   = 0;
             batch_texture = item->texture;
             batch_blend   = item->blend_mode;
         }
-        batch_count += item->vertex_count;
+        batch_count += item->index_count;
     }
-    draw_batch(renderer2d, buffer, batch_texture, batch_blend, batch_start, batch_count);
+    draw_batch(renderer2d, index_buffer, batch_texture, batch_blend, batch_start, batch_count);
 
-    renderer2d->frame_vertex_count = write;
+    renderer2d->stats.vertices    += vertex_write - first_vertex;
+    renderer2d->stats.indices     += index_write - first_index;
+    renderer2d->frame_vertex_count = vertex_write;
+    renderer2d->frame_index_count  = index_write;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -310,12 +379,15 @@ static bool create_white_texture(at_renderer2d *renderer2d) {
 }
 
 static bool create_buffers(at_renderer2d *renderer2d) {
-    VkDeviceSize size = (VkDeviceSize)renderer2d->max_vertices * sizeof(at_vertex2d);
+    at_vk_allocator *allocator    = &renderer2d->renderer->allocator;
+    VkDeviceSize     vertex_bytes = (VkDeviceSize)renderer2d->max_vertices * sizeof(at_vertex2d);
+    VkDeviceSize     index_bytes  = (VkDeviceSize)renderer2d->max_indices * sizeof(uint32_t);
 
     for (uint32_t i = 0; i < AT_VK_FRAMES_IN_FLIGHT; ++i) {
-        if (!at_vk_buffer_create_host(&renderer2d->vertex_buffers[i],
-                                      &renderer2d->renderer->allocator, size,
-                                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT)) {
+        if (!at_vk_buffer_create_host(&renderer2d->vertex_buffers[i], allocator, vertex_bytes,
+                                      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT) ||
+            !at_vk_buffer_create_host(&renderer2d->index_buffers[i], allocator, index_bytes,
+                                      VK_BUFFER_USAGE_INDEX_BUFFER_BIT)) {
             return false;
         }
     }
@@ -324,9 +396,11 @@ static bool create_buffers(at_renderer2d *renderer2d) {
     renderer2d->max_items       = renderer2d->max_vertices / 3 + 1;
     renderer2d->staged_vertices = (at_vertex2d *)malloc((size_t)renderer2d->max_vertices
                                                         * sizeof(at_vertex2d));
+    renderer2d->staged_indices  = (uint32_t *)malloc((size_t)renderer2d->max_indices
+                                                     * sizeof(uint32_t));
     renderer2d->items           = (at_draw_item2d *)malloc((size_t)renderer2d->max_items
                                                            * sizeof(at_draw_item2d));
-    if (!renderer2d->staged_vertices || !renderer2d->items) {
+    if (!renderer2d->staged_vertices || !renderer2d->staged_indices || !renderer2d->items) {
         fprintf(stderr, "[archtype] Out of memory creating the 2D renderer\n");
         return false;
     }
@@ -349,6 +423,7 @@ at_renderer2d *at_renderer2d_create(at_renderer *renderer, const at_renderer2d_d
     renderer2d->max_vertices = (desc && desc->max_vertices > 0)
                              ? desc->max_vertices
                              : AT_RENDERER2D_DEFAULT_MAX_VERTICES;
+    renderer2d->max_indices  = renderer2d->max_vertices * AT_INDICES_PER_VERTEX;
     renderer2d->zoom         = 1.0f;
     renderer2d->blend_mode   = AT_BLEND_ALPHA;
 
@@ -370,17 +445,19 @@ void at_renderer2d_destroy(at_renderer2d *renderer2d) {
 
     at_renderer *renderer = renderer2d->renderer;
 
-    /* The GPU may still be reading the vertex buffers */
+    /* The GPU may still be reading the buffers */
     vkDeviceWaitIdle(renderer->context.device);
 
     for (uint32_t i = 0; i < AT_VK_FRAMES_IN_FLIGHT; ++i) {
         at_vk_buffer_destroy(&renderer2d->vertex_buffers[i], &renderer->allocator);
+        at_vk_buffer_destroy(&renderer2d->index_buffers[i], &renderer->allocator);
     }
     at_texture_destroy(renderer, renderer2d->white_texture);
     for (uint32_t mode = 0; mode < AT_BLEND_MODE_COUNT; ++mode) {
         at_pipeline_destroy(renderer, renderer2d->pipelines[mode]);
     }
     free(renderer2d->items);
+    free(renderer2d->staged_indices);
     free(renderer2d->staged_vertices);
     free(renderer2d);
 }
@@ -411,9 +488,12 @@ void at_renderer2d_begin(at_renderer2d *renderer2d, const at_camera2d *camera) {
     if (renderer2d->frame_number != renderer->frame_number) {
         renderer2d->frame_number       = renderer->frame_number;
         renderer2d->frame_vertex_count = 0;
+        renderer2d->frame_index_count  = 0;
+        memset(&renderer2d->stats, 0, sizeof(renderer2d->stats));
     }
 
     renderer2d->staged_vertex_count = 0;
+    renderer2d->staged_index_count  = 0;
     renderer2d->item_count          = 0;
     renderer2d->needs_sort          = false;
     renderer2d->layer               = 0;
@@ -442,6 +522,7 @@ void at_renderer2d_end(at_renderer2d *renderer2d) {
 
     submit(renderer2d);
     renderer2d->staged_vertex_count = 0;
+    renderer2d->staged_index_count  = 0;
     renderer2d->item_count          = 0;
     renderer2d->active              = false;
 }
@@ -476,50 +557,64 @@ at_blend_mode at_renderer2d_get_blend_mode(const at_renderer2d *renderer2d) {
     return renderer2d ? renderer2d->blend_mode : AT_BLEND_ALPHA;
 }
 
+at_renderer2d_stats at_renderer2d_get_stats(const at_renderer2d *renderer2d) {
+    at_renderer2d_stats stats;
+    memset(&stats, 0, sizeof(stats));
+    if (renderer2d) {
+        stats = renderer2d->stats;
+    }
+    return stats;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Shapes                                                                    */
 /* ------------------------------------------------------------------------ */
 
 void at_renderer2d_draw_triangle(at_renderer2d *renderer2d,
                                  at_vec2 a, at_vec2 b, at_vec2 c, at_color color) {
-    if (!renderer2d) {
-        return;
-    }
-
-    at_vertex2d *v = reserve_vertices(renderer2d, 3, renderer2d->white_texture);
-    if (!v) {
+    at_geometry2d g;
+    if (!renderer2d || !reserve(renderer2d, 3, 3, renderer2d->white_texture, &g)) {
         return;
     }
 
     uint8_t rgba[4];
     pack_color(color, rgba);
-    set_vertex(&v[0], a.x, a.y, WHITE_UV, WHITE_UV, rgba);
-    set_vertex(&v[1], b.x, b.y, WHITE_UV, WHITE_UV, rgba);
-    set_vertex(&v[2], c.x, c.y, WHITE_UV, WHITE_UV, rgba);
+    set_vertex(&g.vertices[0], a.x, a.y, WHITE_UV, WHITE_UV, rgba);
+    set_vertex(&g.vertices[1], b.x, b.y, WHITE_UV, WHITE_UV, rgba);
+    set_vertex(&g.vertices[2], c.x, c.y, WHITE_UV, WHITE_UV, rgba);
+
+    g.indices[0] = g.base;
+    g.indices[1] = g.base + 1;
+    g.indices[2] = g.base + 2;
 }
 
-/* Two triangles from four corners given in order around the shape.  */
-/* uvs holds the texture coordinates of each corner, or NULL for the  */
-/* white texture of the shapes.                                       */
-static void write_quad(at_vertex2d *v, const at_vec2 corners[4], const at_vec2 uvs[4],
-                       const uint8_t rgba[4]) {
-    static const int order[6] = { 0, 1, 2, 2, 3, 0 };
+/* A quad: four corners given in order around the shape, as two triangles */
+/* that share two of them. uvs holds the texture coordinates of each      */
+/* corner, or NULL for the white texture of the shapes.                   */
+static void draw_quad(at_renderer2d *renderer2d, at_texture *texture, const at_vec2 corners[4],
+                      const at_vec2 uvs[4], at_color color) {
+    at_geometry2d g;
+    if (!reserve(renderer2d, 4, 6, texture, &g)) {
+        return;
+    }
+
+    uint8_t rgba[4];
+    pack_color(color, rgba);
+    for (int i = 0; i < 4; ++i) {
+        float u = uvs ? uvs[i].x : WHITE_UV;
+        float v = uvs ? uvs[i].y : WHITE_UV;
+        set_vertex(&g.vertices[i], corners[i].x, corners[i].y, u, v, rgba);
+    }
+
+    static const uint32_t order[6] = { 0, 1, 2, 2, 3, 0 };
     for (int i = 0; i < 6; ++i) {
-        int   corner = order[i];
-        float u      = uvs ? uvs[corner].x : WHITE_UV;
-        float t      = uvs ? uvs[corner].y : WHITE_UV;
-        set_vertex(&v[i], corners[corner].x, corners[corner].y, u, t, rgba);
+        g.indices[i] = g.base + order[i];
     }
 }
 
 void at_renderer2d_draw_rect(at_renderer2d *renderer2d, at_vec2 center, at_vec2 size,
                              float rotation, at_color color) {
     if (!renderer2d) {
-        return;
-    }
-
-    at_vertex2d *v = reserve_vertices(renderer2d, 6, renderer2d->white_texture);
-    if (!v) {
         return;
     }
 
@@ -537,9 +632,7 @@ void at_renderer2d_draw_rect(at_renderer2d *renderer2d, at_vec2 center, at_vec2 
                                   center.y + local[i][0] * s + local[i][1] * c);
     }
 
-    uint8_t rgba[4];
-    pack_color(color, rgba);
-    write_quad(v, corners, NULL, rgba);
+    draw_quad(renderer2d, renderer2d->white_texture, corners, NULL, color);
 }
 
 void at_renderer2d_draw_circle(at_renderer2d *renderer2d, at_vec2 center, float radius,
@@ -549,40 +642,35 @@ void at_renderer2d_draw_circle(at_renderer2d *renderer2d, at_vec2 center, float 
     }
 
     /* More segments for bigger circles on screen: about 6 * sqrt(radius) */
-    float screen_radius = radius * renderer2d->zoom;
-    int   segments      = (int)(6.0f * sqrtf(screen_radius));
+    float    screen_radius = radius * renderer2d->zoom;
+    uint32_t segments      = (uint32_t)(6.0f * sqrtf(screen_radius));
     if (segments < AT_CIRCLE_MIN_SEGMENTS) {
         segments = AT_CIRCLE_MIN_SEGMENTS;
     } else if (segments > AT_CIRCLE_MAX_SEGMENTS) {
         segments = AT_CIRCLE_MAX_SEGMENTS;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, (uint32_t)segments * 3,
-                                      renderer2d->white_texture);
-    if (!v) {
+    /* A fan of triangles around one shared center vertex */
+    at_geometry2d g;
+    if (!reserve(renderer2d, segments + 1, segments * 3, renderer2d->white_texture, &g)) {
         return;
     }
 
     uint8_t rgba[4];
     pack_color(color, rgba);
 
-    /* A fan of triangles from the center */
-    float step   = AT_TAU / (float)segments;
-    float prev_x = center.x + radius;
-    float prev_y = center.y;
+    set_vertex(&g.vertices[0], center.x, center.y, WHITE_UV, WHITE_UV, rgba);
 
-    for (int i = 1; i <= segments; ++i) {
+    float step = AT_TAU / (float)segments;
+    for (uint32_t i = 0; i < segments; ++i) {
         float angle = step * (float)i;
-        float x     = i == segments ? center.x + radius : center.x + radius * cosf(angle);
-        float y     = i == segments ? center.y          : center.y + radius * sinf(angle);
+        set_vertex(&g.vertices[1 + i], center.x + radius * cosf(angle),
+                   center.y + radius * sinf(angle), WHITE_UV, WHITE_UV, rgba);
 
-        set_vertex(&v[0], center.x, center.y, WHITE_UV, WHITE_UV, rgba);
-        set_vertex(&v[1], prev_x, prev_y, WHITE_UV, WHITE_UV, rgba);
-        set_vertex(&v[2], x, y, WHITE_UV, WHITE_UV, rgba);
-        v += 3;
-
-        prev_x = x;
-        prev_y = y;
+        /* Center, this point, next point (the last one closes the ring) */
+        g.indices[i * 3 + 0] = g.base;
+        g.indices[i * 3 + 1] = g.base + 1 + i;
+        g.indices[i * 3 + 2] = g.base + 1 + (i + 1) % segments;
     }
 }
 
@@ -599,11 +687,6 @@ void at_renderer2d_draw_line(at_renderer2d *renderer2d, at_vec2 from, at_vec2 to
         return;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, 6, renderer2d->white_texture);
-    if (!v) {
-        return;
-    }
-
     /* Half the thickness to each side, perpendicular to the line */
     float nx = -dy / length * thickness * 0.5f;
     float ny =  dx / length * thickness * 0.5f;
@@ -615,9 +698,7 @@ void at_renderer2d_draw_line(at_renderer2d *renderer2d, at_vec2 from, at_vec2 to
         at_vec2_make(from.x + nx, from.y + ny),
     };
 
-    uint8_t rgba[4];
-    pack_color(color, rgba);
-    write_quad(v, corners, NULL, rgba);
+    draw_quad(renderer2d, renderer2d->white_texture, corners, NULL, color);
 }
 
 /* ------------------------------------------------------------------------ */
@@ -658,11 +739,6 @@ void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_des
         height = source.height;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, 6, texture);
-    if (!v) {
-        return;
-    }
-
     /* Edges around the origin point, with +Y up */
     float left   = -sprite->origin.x * width;
     float right  = (1.0f - sprite->origin.x) * width;
@@ -698,7 +774,5 @@ void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_des
         at_vec2_make(u0, v1), at_vec2_make(u1, v1), at_vec2_make(u1, v0), at_vec2_make(u0, v0),
     };
 
-    uint8_t rgba[4];
-    pack_color(sprite->tint, rgba);
-    write_quad(v, corners, uvs, rgba);
+    draw_quad(renderer2d, texture, corners, uvs, sprite->tint);
 }

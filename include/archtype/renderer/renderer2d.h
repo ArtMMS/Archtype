@@ -28,7 +28,9 @@ AT_EXTERN_C_BEGIN
  *
  * Batching: after sorting, everything in a row that uses the same texture
  * and blend mode is drawn with one draw call. Shapes all share one texture,
- * so they batch with each other.
+ * so they batch with each other, and sprites from one texture atlas or
+ * sprite sheet batch together too. at_renderer2d_get_stats shows how many
+ * draw calls a frame took.
  *
  * Transparency: the alpha of colors and textures is blended by default
  * (AT_BLEND_ALPHA). at_renderer2d_set_blend_mode also offers additive
@@ -48,8 +50,9 @@ AT_EXTERN_C_BEGIN
  * camera and once with a fixed camera for the HUD. Layers only sort inside
  * one begin/end: everything in a later begin/end is drawn on top.
  *
- * at_renderer2d_end binds its own pipeline: after it, bind your pipeline
- * again before calling at_renderer_draw or at_renderer_draw_indexed.
+ * at_renderer2d_end binds its own pipeline and buffers: after it, bind
+ * your pipeline and buffers again before calling at_renderer_draw or
+ * at_renderer_draw_indexed.
  *
  * Textures used by sprites must stay alive until at_renderer2d_end.
  */
@@ -57,15 +60,28 @@ AT_EXTERN_C_BEGIN
 /* Opaque 2D renderer handle. */
 typedef struct at_renderer2d at_renderer2d;
 
-#define AT_RENDERER2D_DEFAULT_MAX_VERTICES 131072 /* About 21 000 sprites per frame */
+#define AT_RENDERER2D_DEFAULT_MAX_VERTICES 131072 /* About 32 000 sprites per frame */
 
 /* Zero-initialize for the defaults, or pass NULL. */
 typedef struct at_renderer2d_desc {
     /* Most vertices drawn per frame (0 = AT_RENDERER2D_DEFAULT_MAX_VERTICES). */
-    /* A sprite, rectangle or line uses 6, a triangle 3, a circle 3 per segment. */
-    /* Memory: about 70 bytes per vertex (GPU buffers and the CPU copy).       */
+    /* A sprite, rectangle or line uses 4, a triangle 3, a circle one per     */
+    /* segment plus one. Memory: about 85 bytes per vertex (GPU buffers,      */
+    /* indices and the CPU copy).                                             */
     uint32_t max_vertices;
 } at_renderer2d_desc;
+
+/* What the 2D renderer did in the current frame, over every begin/end. */
+/* Read it after at_renderer2d_end; it starts again at the first begin  */
+/* of the next frame.                                                   */
+typedef struct at_renderer2d_stats {
+    uint32_t draw_calls; /* Batches sent to the GPU                        */
+    uint32_t primitives; /* Shapes and sprites drawn                       */
+    uint32_t vertices;
+    uint32_t indices;
+    uint32_t skipped;    /* Shapes and sprites dropped: the renderer was   */
+                         /* full (raise at_renderer2d_desc.max_vertices)   */
+} at_renderer2d_stats;
 
 /* Creates a 2D renderer. desc may be NULL. Returns NULL on failure. */
 AT_API at_renderer2d *at_renderer2d_create(at_renderer *renderer, const at_renderer2d_desc *desc);
@@ -80,6 +96,9 @@ AT_API void at_renderer2d_begin(at_renderer2d *renderer2d, const at_camera2d *ca
 
 /* Sorts everything drawn since begin by layer and sends it to the GPU. */
 AT_API void at_renderer2d_end(at_renderer2d *renderer2d);
+
+/* Counts of the current frame so far (see at_renderer2d_stats). */
+AT_API at_renderer2d_stats at_renderer2d_get_stats(const at_renderer2d *renderer2d);
 
 /* ------------------------------------------------------------------------ */
 /* Draw state: applies to the next shapes and sprites, until changed.       */
