@@ -111,6 +111,13 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `paint_c` | Drawing a color-changing trail with the mouse. |
 | `spin_c` | 3D quads with a uniform buffer (camera) and push constants (objects). |
 | `texture_c` | Textures: a generated checkerboard and an image loaded from a file. |
+| `camera2d_c` | 2D orthographic camera: drag with the left mouse button to move, mouse wheel to zoom toward the cursor. |
+| `shapes2d_c` | 2D renderer shapes: rectangles, circles, triangles and lines, drawn in a few draw calls. |
+| `sprites2d_c` | Textured sprites with rotation, origin, flipping and tint. Shows `c/texture/image.png` when it exists. |
+| `layers2d_c` | Draw order with layers (z-order), depth sorting by Y, alpha and additive blending, and a HUD. |
+| `atlas2d_c` | Sprite sheets, frame animations and a texture atlas packed at runtime. Packs `c/texture/image.png` when it exists. |
+| `stress2d_c` | Batching stress test with up to 100k sprites: draw calls with an atlas versus one texture per image. |
+| `text2d_c` | Text with the built-in bitmap font: scales, colors, alignment, measuring and a stats HUD. |
 
 
 ## Technologies
