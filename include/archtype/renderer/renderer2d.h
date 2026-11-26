@@ -6,15 +6,19 @@
 #include "archtype/renderer/camera2d.h"
 #include "archtype/renderer/color.h"
 #include "archtype/renderer/renderer.h"
+#include "archtype/renderer/texture.h"
 
 AT_EXTERN_C_BEGIN
 
 /*
- * 2D renderer: draws shapes in world space, seen through an at_camera2d.
+ * 2D renderer: draws shapes and sprites in world space, seen through an
+ * at_camera2d.
  *
- * Shapes are not drawn one by one: they are collected in a vertex buffer
- * and sent to the GPU together (batching), in the order they were drawn.
- * Later shapes are drawn on top of earlier ones, and alpha is blended.
+ * Nothing is drawn one by one: shapes and sprites are collected in a vertex
+ * buffer and sent to the GPU together (batching), in the order they were
+ * drawn. Later ones are drawn on top of earlier ones, and alpha is blended.
+ * Every change of texture starts a new batch (one more draw call), so draw
+ * things that share a texture one after another when you can.
  *
  * Usage, every frame:
  *
@@ -31,17 +35,19 @@ AT_EXTERN_C_BEGIN
  *
  * at_renderer2d_end binds its own pipeline: after it, bind your pipeline
  * again before calling at_renderer_draw or at_renderer_draw_indexed.
+ *
+ * Textures used by sprites must stay alive until at_renderer2d_end.
  */
 
 /* Opaque 2D renderer handle. */
 typedef struct at_renderer2d at_renderer2d;
 
-#define AT_RENDERER2D_DEFAULT_MAX_VERTICES 131072 /* About 21 000 rectangles per frame */
+#define AT_RENDERER2D_DEFAULT_MAX_VERTICES 131072 /* About 21 000 sprites per frame */
 
 /* Zero-initialize for the defaults, or pass NULL. */
 typedef struct at_renderer2d_desc {
     /* Most vertices drawn per frame (0 = AT_RENDERER2D_DEFAULT_MAX_VERTICES). */
-    /* A rectangle or a line uses 6, a triangle 3, a circle 3 per segment.     */
+    /* A sprite, rectangle or line uses 6, a triangle 3, a circle 3 per segment. */
     uint32_t max_vertices;
 } at_renderer2d_desc;
 
@@ -60,9 +66,56 @@ AT_API void at_renderer2d_begin(at_renderer2d *renderer2d, const at_camera2d *ca
 AT_API void at_renderer2d_end(at_renderer2d *renderer2d);
 
 /* ------------------------------------------------------------------------ */
-/* Shapes: only valid between at_renderer2d_begin and at_renderer2d_end.    */
+/* Sprites                                                                   */
+/* ------------------------------------------------------------------------ */
+
+/* Everything about one sprite. Start from at_sprite_desc_make, which fills */
+/* the defaults, and change what you need.                                  */
+typedef struct at_sprite_desc {
+    at_texture *texture;  /* NULL draws a solid rectangle in the tint color   */
+    at_vec2     position; /* World position of the origin point               */
+    at_vec2     size;     /* World units; (0, 0) uses the texture size, so    */
+                          /* the sprite is 1 texel per pixel at zoom 1        */
+    at_vec2     origin;   /* Point of the sprite placed at position, and the  */
+                          /* point it turns around, from 0 to 1 on each side: */
+                          /* (0, 0) bottom-left, (0.5, 0.5) center (default), */
+                          /* (0.5, 0) bottom center, e.g. a character's feet  */
+    float       rotation; /* Radians, counter-clockwise                       */
+    at_color    tint;     /* Multiplies the texture colors (white keeps them) */
+                          /* and its alpha fades the sprite                   */
+    bool        flip_x;   /* Mirror left-right, e.g. a character facing left  */
+    bool        flip_y;   /* Mirror top-bottom                                */
+} at_sprite_desc;
+
+/* Sprite of the whole texture at position: texture size, centered origin, */
+/* no rotation, white tint, not flipped.                                   */
+static inline at_sprite_desc at_sprite_desc_make(at_texture *texture, at_vec2 position) {
+    at_sprite_desc sprite;
+    sprite.texture  = texture;
+    sprite.position = position;
+    sprite.size     = at_vec2_zero();
+    sprite.origin   = at_vec2_make(0.5f, 0.5f);
+    sprite.rotation = 0.0f;
+    sprite.tint     = at_color_white();
+    sprite.flip_x   = false;
+    sprite.flip_y   = false;
+    return sprite;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Drawing: only valid between at_renderer2d_begin and at_renderer2d_end.   */
 /* Positions and sizes are in world units (pixels at zoom 1, +Y up).        */
 /* ------------------------------------------------------------------------ */
+
+/* Sprite centered at center, turned by rotation radians around its center. */
+/* size (0, 0) uses the texture size. tint multiplies the texture colors    */
+/* (at_color_white() keeps them). texture NULL draws a solid rectangle.     */
+AT_API void at_renderer2d_draw_sprite(at_renderer2d *renderer2d, at_texture *texture,
+                                      at_vec2 center, at_vec2 size, float rotation,
+                                      at_color tint);
+
+/* Sprite with every option: origin, flipping... (see at_sprite_desc). */
+AT_API void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_desc *sprite);
 
 /* Filled triangle with corners a, b and c (any order). */
 AT_API void at_renderer2d_draw_triangle(at_renderer2d *renderer2d,

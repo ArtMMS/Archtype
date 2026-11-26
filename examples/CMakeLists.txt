@@ -73,3 +73,11 @@ archtype_add_shaders(camera2d_c
 # Uses the engine's built-in shaders, so there are no shaders to compile here.
 add_executable(shapes2d_c c/shapes2d/main.c)
 target_link_libraries(shapes2d_c PRIVATE Archtype::archtype)
+
+# 2D sprites: textures with rotation, origin, flipping and tint.
+# Also shows c/texture/image.png in the middle, when it exists.
+add_executable(sprites2d_c c/sprites2d/main.c)
+target_link_libraries(sprites2d_c PRIVATE Archtype::archtype)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/c/texture/image.png")
+    archtype_add_assets(sprites2d_c textures c/texture/image.png)
+endif()

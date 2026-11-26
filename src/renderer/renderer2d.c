@@ -15,6 +15,9 @@ static const uint32_t k_fragment_shader[] =
 #include "embedded/renderer2d.frag.inc"
 ;
 
+/* Texture coordinate of the shapes: the center of the 1x1 white texture */
+#define WHITE_UV 0.5f
+
 /* Circles: segments by radius on screen, in pixels */
 #define AT_CIRCLE_MIN_SEGMENTS 12
 #define AT_CIRCLE_MAX_SEGMENTS 128
@@ -37,10 +40,11 @@ struct at_renderer2d {
     uint32_t      max_vertices;
 
     /* Vertices of the current frame */
-    uint64_t      frame_number; /* Renderer frame the counts below belong to */
-    uint32_t      vertex_count; /* Vertices written this frame               */
-    uint32_t      batch_start;  /* First vertex not sent to the GPU yet      */
-    bool          full_warned;  /* "Buffer full" is only reported once       */
+    uint64_t      frame_number;  /* Renderer frame the counts below belong to */
+    uint32_t      vertex_count;  /* Vertices written this frame               */
+    uint32_t      batch_start;   /* First vertex not sent to the GPU yet      */
+    at_texture   *batch_texture; /* Texture of the vertices not sent yet      */
+    bool          full_warned;   /* "Buffer full" is only reported once       */
 
     /* Between begin and end */
     bool          active;
@@ -57,11 +61,12 @@ static uint8_t to_byte(float value) {
     return (uint8_t)(at_clampf(value, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
 
-static void set_vertex(at_vertex2d *vertex, float x, float y, const uint8_t color[4]) {
+static void set_vertex(at_vertex2d *vertex, float x, float y, float u, float v,
+                       const uint8_t color[4]) {
     vertex->position[0] = x;
     vertex->position[1] = y;
-    vertex->uv[0]       = 0.5f; /* Center of the white texel */
-    vertex->uv[1]       = 0.5f;
+    vertex->uv[0]       = u;
+    vertex->uv[1]       = v;
     vertex->color[0]    = color[0];
     vertex->color[1]    = color[1];
     vertex->color[2]    = color[2];
@@ -79,12 +84,17 @@ static at_vk_buffer *current_vertex_buffer(at_renderer2d *renderer2d) {
     return &renderer2d->vertex_buffers[at_renderer_frame_index(renderer2d->renderer)];
 }
 
-/* Takes room for count vertices in this frame's buffer. Returns NULL (and */
-/* the shape is skipped) outside begin/end or when the buffer is full.     */
-static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count) {
+static void flush(at_renderer2d *renderer2d);
+
+/* Takes room for count vertices that use texture in this frame's buffer.   */
+/* A different texture than the vertices waiting to be drawn sends those to */
+/* the GPU first. Returns NULL (and the drawing is skipped) outside         */
+/* begin/end or when the buffer is full.                                    */
+static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count,
+                                     at_texture *texture) {
     if (!renderer2d->active) {
         if (!renderer2d->inactive_warned) {
-            fprintf(stderr, "[archtype] 2D shapes must be drawn between "
+            fprintf(stderr, "[archtype] 2D shapes and sprites must be drawn between "
                             "at_renderer2d_begin and at_renderer2d_end\n");
             renderer2d->inactive_warned = true;
         }
@@ -94,11 +104,17 @@ static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count) 
     if (count > renderer2d->max_vertices - renderer2d->vertex_count) {
         if (!renderer2d->full_warned) {
             fprintf(stderr, "[archtype] 2D renderer is full (%u vertices this frame): "
-                            "shapes skipped. Raise at_renderer2d_desc.max_vertices\n",
+                            "drawing skipped. Raise at_renderer2d_desc.max_vertices\n",
                     renderer2d->max_vertices);
             renderer2d->full_warned = true;
         }
         return NULL;
+    }
+
+    /* One batch is one texture: a new texture ends the current batch */
+    if (texture != renderer2d->batch_texture) {
+        flush(renderer2d);
+        renderer2d->batch_texture = texture;
     }
 
     at_vertex2d *vertices = (at_vertex2d *)current_vertex_buffer(renderer2d)->mapped
@@ -107,7 +123,8 @@ static at_vertex2d *reserve_vertices(at_renderer2d *renderer2d, uint32_t count) 
     return vertices;
 }
 
-/* Draws the vertices written since the last flush with one draw call */
+/* Draws the vertices written since the last flush with one draw call, */
+/* using the batch's texture.                                           */
 static void flush(at_renderer2d *renderer2d) {
     uint32_t count = renderer2d->vertex_count - renderer2d->batch_start;
     if (count == 0) {
@@ -123,7 +140,7 @@ static void flush(at_renderer2d *renderer2d) {
                        (VkDeviceSize)count * sizeof(at_vertex2d));
 
     at_renderer_bind_pipeline(renderer, renderer2d->pipeline);
-    at_renderer_bind_texture(renderer, 0, renderer2d->white_texture);
+    at_renderer_bind_texture(renderer, 0, renderer2d->batch_texture);
     at_renderer_push_constants(renderer, &renderer2d->view_projection, sizeof(at_mat4));
 
     /* The batch starts in the middle of the buffer: bind it at an offset */
@@ -304,7 +321,8 @@ void at_renderer2d_end(at_renderer2d *renderer2d) {
     }
 
     flush(renderer2d);
-    renderer2d->active = false;
+    renderer2d->batch_texture = NULL;
+    renderer2d->active        = false;
 }
 
 /* ------------------------------------------------------------------------ */
@@ -317,23 +335,29 @@ void at_renderer2d_draw_triangle(at_renderer2d *renderer2d,
         return;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, 3);
+    at_vertex2d *v = reserve_vertices(renderer2d, 3, renderer2d->white_texture);
     if (!v) {
         return;
     }
 
     uint8_t rgba[4];
     pack_color(color, rgba);
-    set_vertex(&v[0], a.x, a.y, rgba);
-    set_vertex(&v[1], b.x, b.y, rgba);
-    set_vertex(&v[2], c.x, c.y, rgba);
+    set_vertex(&v[0], a.x, a.y, WHITE_UV, WHITE_UV, rgba);
+    set_vertex(&v[1], b.x, b.y, WHITE_UV, WHITE_UV, rgba);
+    set_vertex(&v[2], c.x, c.y, WHITE_UV, WHITE_UV, rgba);
 }
 
-/* Two triangles from four corners given in order around the shape */
-static void write_quad(at_vertex2d *v, const at_vec2 corners[4], const uint8_t rgba[4]) {
+/* Two triangles from four corners given in order around the shape.  */
+/* uvs holds the texture coordinates of each corner, or NULL for the  */
+/* white texture of the shapes.                                       */
+static void write_quad(at_vertex2d *v, const at_vec2 corners[4], const at_vec2 uvs[4],
+                       const uint8_t rgba[4]) {
     static const int order[6] = { 0, 1, 2, 2, 3, 0 };
     for (int i = 0; i < 6; ++i) {
-        set_vertex(&v[i], corners[order[i]].x, corners[order[i]].y, rgba);
+        int   corner = order[i];
+        float u      = uvs ? uvs[corner].x : WHITE_UV;
+        float t      = uvs ? uvs[corner].y : WHITE_UV;
+        set_vertex(&v[i], corners[corner].x, corners[corner].y, u, t, rgba);
     }
 }
 
@@ -343,7 +367,7 @@ void at_renderer2d_draw_rect(at_renderer2d *renderer2d, at_vec2 center, at_vec2 
         return;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, 6);
+    at_vertex2d *v = reserve_vertices(renderer2d, 6, renderer2d->white_texture);
     if (!v) {
         return;
     }
@@ -364,7 +388,7 @@ void at_renderer2d_draw_rect(at_renderer2d *renderer2d, at_vec2 center, at_vec2 
 
     uint8_t rgba[4];
     pack_color(color, rgba);
-    write_quad(v, corners, rgba);
+    write_quad(v, corners, NULL, rgba);
 }
 
 void at_renderer2d_draw_circle(at_renderer2d *renderer2d, at_vec2 center, float radius,
@@ -382,7 +406,8 @@ void at_renderer2d_draw_circle(at_renderer2d *renderer2d, at_vec2 center, float 
         segments = AT_CIRCLE_MAX_SEGMENTS;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, (uint32_t)segments * 3);
+    at_vertex2d *v = reserve_vertices(renderer2d, (uint32_t)segments * 3,
+                                      renderer2d->white_texture);
     if (!v) {
         return;
     }
@@ -400,9 +425,9 @@ void at_renderer2d_draw_circle(at_renderer2d *renderer2d, at_vec2 center, float 
         float x     = i == segments ? center.x + radius : center.x + radius * cosf(angle);
         float y     = i == segments ? center.y          : center.y + radius * sinf(angle);
 
-        set_vertex(&v[0], center.x, center.y, rgba);
-        set_vertex(&v[1], prev_x, prev_y, rgba);
-        set_vertex(&v[2], x, y, rgba);
+        set_vertex(&v[0], center.x, center.y, WHITE_UV, WHITE_UV, rgba);
+        set_vertex(&v[1], prev_x, prev_y, WHITE_UV, WHITE_UV, rgba);
+        set_vertex(&v[2], x, y, WHITE_UV, WHITE_UV, rgba);
         v += 3;
 
         prev_x = x;
@@ -423,7 +448,7 @@ void at_renderer2d_draw_line(at_renderer2d *renderer2d, at_vec2 from, at_vec2 to
         return;
     }
 
-    at_vertex2d *v = reserve_vertices(renderer2d, 6);
+    at_vertex2d *v = reserve_vertices(renderer2d, 6, renderer2d->white_texture);
     if (!v) {
         return;
     }
@@ -441,5 +466,77 @@ void at_renderer2d_draw_line(at_renderer2d *renderer2d, at_vec2 from, at_vec2 to
 
     uint8_t rgba[4];
     pack_color(color, rgba);
-    write_quad(v, corners, rgba);
+    write_quad(v, corners, NULL, rgba);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Sprites                                                                   */
+/* ------------------------------------------------------------------------ */
+
+void at_renderer2d_draw_sprite(at_renderer2d *renderer2d, at_texture *texture,
+                               at_vec2 center, at_vec2 size, float rotation, at_color tint) {
+    at_sprite_desc sprite = at_sprite_desc_make(texture, center);
+    sprite.size     = size;
+    sprite.rotation = rotation;
+    sprite.tint     = tint;
+    at_renderer2d_draw_sprite_ex(renderer2d, &sprite);
+}
+
+void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_desc *sprite) {
+    if (!renderer2d || !sprite) {
+        return;
+    }
+
+    at_texture *texture = sprite->texture ? sprite->texture : renderer2d->white_texture;
+
+    /* (0, 0) means the texture size: one texel per world unit */
+    float width  = sprite->size.x;
+    float height = sprite->size.y;
+    if (width == 0.0f && height == 0.0f) {
+        uint32_t texture_width  = 1;
+        uint32_t texture_height = 1;
+        if (sprite->texture) {
+            at_texture_get_size(sprite->texture, &texture_width, &texture_height);
+        }
+        width  = (float)texture_width;
+        height = (float)texture_height;
+    }
+
+    at_vertex2d *v = reserve_vertices(renderer2d, 6, texture);
+    if (!v) {
+        return;
+    }
+
+    /* Edges around the origin point, with +Y up */
+    float left   = -sprite->origin.x * width;
+    float right  = (1.0f - sprite->origin.x) * width;
+    float bottom = -sprite->origin.y * height;
+    float top    = (1.0f - sprite->origin.y) * height;
+
+    const float local[4][2] = {
+        { left,  bottom }, { right, bottom }, { right, top }, { left, top },
+    };
+
+    float   c = cosf(sprite->rotation);
+    float   s = sinf(sprite->rotation);
+    at_vec2 corners[4];
+    for (int i = 0; i < 4; ++i) {
+        corners[i] = at_vec2_make(sprite->position.x + local[i][0] * c - local[i][1] * s,
+                                  sprite->position.y + local[i][0] * s + local[i][1] * c);
+    }
+
+    /* Texture coordinates: (0, 0) is the top-left of the image, so the  */
+    /* top of the sprite (+Y in the world) uses v = 0.                   */
+    float u0 = sprite->flip_x ? 1.0f : 0.0f;
+    float u1 = sprite->flip_x ? 0.0f : 1.0f;
+    float v0 = sprite->flip_y ? 1.0f : 0.0f; /* Top    */
+    float v1 = sprite->flip_y ? 0.0f : 1.0f; /* Bottom */
+
+    const at_vec2 uvs[4] = {
+        at_vec2_make(u0, v1), at_vec2_make(u1, v1), at_vec2_make(u1, v0), at_vec2_make(u0, v0),
+    };
+
+    uint8_t rgba[4];
+    pack_color(sprite->tint, rgba);
+    write_quad(v, corners, uvs, rgba);
 }

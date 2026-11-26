@@ -2,7 +2,8 @@
 
 // Engine shader for the 2D renderer: compiled into the library at build time.
 
-// Shapes use a 1x1 white texture, so the result is just the vertex color
+// Sprites sample their texture, tinted by the vertex color. Shapes use a
+// 1x1 white texture, so for them the result is just the vertex color.
 layout(set = 0, binding = 0) uniform sampler2D tex;
 
 layout(location = 0) in vec2 in_uv;
