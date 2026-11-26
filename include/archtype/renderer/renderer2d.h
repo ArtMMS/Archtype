@@ -2,6 +2,7 @@
 #define ARCHTYPE_RENDERER_RENDERER2D_H
 
 #include "archtype/core/defines.h"
+#include "archtype/math/rect.h"
 #include "archtype/math/vec.h"
 #include "archtype/renderer/camera2d.h"
 #include "archtype/renderer/color.h"
@@ -109,9 +110,12 @@ AT_API at_blend_mode at_renderer2d_get_blend_mode(const at_renderer2d *renderer2
 /* the defaults, and change what you need.                                  */
 typedef struct at_sprite_desc {
     at_texture *texture;  /* NULL draws a solid rectangle in the tint color   */
+    at_rect     source;   /* Part of the texture to draw, in texels from the  */
+                          /* top-left of the image (a frame of a sprite sheet */
+                          /* or a region of an atlas). Empty = whole texture  */
     at_vec2     position; /* World position of the origin point               */
-    at_vec2     size;     /* World units; (0, 0) uses the texture size, so    */
-                          /* the sprite is 1 texel per pixel at zoom 1        */
+    at_vec2     size;     /* World units; (0, 0) uses the source size, so the */
+                          /* sprite is 1 texel per pixel at zoom 1            */
     at_vec2     origin;   /* Point of the sprite placed at position, and the  */
                           /* point it turns around, from 0 to 1 on each side: */
                           /* (0, 0) bottom-left, (0.5, 0.5) center (default), */
@@ -128,6 +132,7 @@ typedef struct at_sprite_desc {
 static inline at_sprite_desc at_sprite_desc_make(at_texture *texture, at_vec2 position) {
     at_sprite_desc sprite;
     sprite.texture  = texture;
+    sprite.source   = at_rect_make(0.0f, 0.0f, 0.0f, 0.0f);
     sprite.position = position;
     sprite.size     = at_vec2_zero();
     sprite.origin   = at_vec2_make(0.5f, 0.5f);
@@ -143,14 +148,16 @@ static inline at_sprite_desc at_sprite_desc_make(at_texture *texture, at_vec2 po
 /* Positions and sizes are in world units (pixels at zoom 1, +Y up).        */
 /* ------------------------------------------------------------------------ */
 
-/* Sprite centered at center, turned by rotation radians around its center. */
-/* size (0, 0) uses the texture size. tint multiplies the texture colors    */
-/* (at_color_white() keeps them). texture NULL draws a solid rectangle.     */
+/* Whole texture as a sprite centered at center, turned by rotation radians */
+/* around its center. size (0, 0) uses the texture size. tint multiplies    */
+/* the texture colors (at_color_white() keeps them). texture NULL draws a   */
+/* solid rectangle.                                                         */
 AT_API void at_renderer2d_draw_sprite(at_renderer2d *renderer2d, at_texture *texture,
                                       at_vec2 center, at_vec2 size, float rotation,
                                       at_color tint);
 
-/* Sprite with every option: origin, flipping... (see at_sprite_desc). */
+/* Sprite with every option: part of the texture, origin, flipping... */
+/* (see at_sprite_desc).                                               */
 AT_API void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_desc *sprite);
 
 /* Filled triangle with corners a, b and c (any order). */

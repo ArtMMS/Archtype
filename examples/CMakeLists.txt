@@ -85,3 +85,11 @@ endif()
 # 2D layers: draw order with layers (z-order), depth by Y, blend modes and a HUD
 add_executable(layers2d_c c/layers2d/main.c)
 target_link_libraries(layers2d_c PRIVATE Archtype::archtype)
+
+# Sprite sheets, animations and a texture atlas built at runtime.
+# Also packs c/texture/image.png into the atlas, when it exists and fits.
+add_executable(atlas2d_c c/atlas2d/main.c)
+target_link_libraries(atlas2d_c PRIVATE Archtype::archtype)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/c/texture/image.png")
+    archtype_add_assets(atlas2d_c textures c/texture/image.png)
+endif()

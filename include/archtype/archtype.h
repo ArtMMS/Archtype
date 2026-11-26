@@ -11,6 +11,7 @@
 #include "archtype/math/mat4.h"
 #include "archtype/math/quat.h"
 #include "archtype/math/transform.h"
+#include "archtype/math/rect.h"
 
 #include "archtype/platform/platform.h"
 #include "archtype/platform/window.h"
@@ -19,6 +20,8 @@
 #include "archtype/renderer/color.h"
 #include "archtype/renderer/camera2d.h"
 #include "archtype/renderer/renderer2d.h"
+#include "archtype/renderer/sprite_sheet.h"
+#include "archtype/renderer/texture_atlas.h"
 #include "archtype/renderer/buffer.h"
 #include "archtype/renderer/texture.h"
 #include "archtype/renderer/shader.h"

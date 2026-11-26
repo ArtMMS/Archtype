@@ -640,17 +640,22 @@ void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_des
 
     at_texture *texture = sprite->texture ? sprite->texture : renderer2d->white_texture;
 
-    /* (0, 0) means the texture size: one texel per world unit */
+    uint32_t texture_width  = 1;
+    uint32_t texture_height = 1;
+    at_texture_get_size(texture, &texture_width, &texture_height);
+
+    /* Part of the texture to draw, in texels; empty = all of it */
+    at_rect source = sprite->source;
+    if (!sprite->texture || at_rect_is_empty(source)) {
+        source = at_rect_make(0.0f, 0.0f, (float)texture_width, (float)texture_height);
+    }
+
+    /* (0, 0) means the source size: one texel per world unit */
     float width  = sprite->size.x;
     float height = sprite->size.y;
     if (width == 0.0f && height == 0.0f) {
-        uint32_t texture_width  = 1;
-        uint32_t texture_height = 1;
-        if (sprite->texture) {
-            at_texture_get_size(sprite->texture, &texture_width, &texture_height);
-        }
-        width  = (float)texture_width;
-        height = (float)texture_height;
+        width  = source.width;
+        height = source.height;
     }
 
     at_vertex2d *v = reserve_vertices(renderer2d, 6, texture);
@@ -676,12 +681,18 @@ void at_renderer2d_draw_sprite_ex(at_renderer2d *renderer2d, const at_sprite_des
                                   sprite->position.y + local[i][0] * s + local[i][1] * c);
     }
 
-    /* Texture coordinates: (0, 0) is the top-left of the image, so the  */
-    /* top of the sprite (+Y in the world) uses v = 0.                   */
-    float u0 = sprite->flip_x ? 1.0f : 0.0f;
-    float u1 = sprite->flip_x ? 0.0f : 1.0f;
-    float v0 = sprite->flip_y ? 1.0f : 0.0f; /* Top    */
-    float v1 = sprite->flip_y ? 0.0f : 1.0f; /* Bottom */
+    /* Texture coordinates of the source (0..1 over the whole texture).  */
+    /* (0, 0) is the top-left of the image, so the top of the sprite     */
+    /* (+Y in the world) uses the top of the source.                     */
+    float left_u   = source.x / (float)texture_width;
+    float right_u  = (source.x + source.width) / (float)texture_width;
+    float top_v    = source.y / (float)texture_height;
+    float bottom_v = (source.y + source.height) / (float)texture_height;
+
+    float u0 = sprite->flip_x ? right_u  : left_u;
+    float u1 = sprite->flip_x ? left_u   : right_u;
+    float v0 = sprite->flip_y ? bottom_v : top_v;    /* Top of the sprite    */
+    float v1 = sprite->flip_y ? top_v    : bottom_v; /* Bottom of the sprite */
 
     const at_vec2 uvs[4] = {
         at_vec2_make(u0, v1), at_vec2_make(u1, v1), at_vec2_make(u1, v0), at_vec2_make(u0, v0),

@@ -141,6 +141,7 @@ add_library(archtype
     src/renderer/renderer2d.c
     src/renderer/shader.c
     src/renderer/texture.c
+    src/renderer/texture_atlas.c
     src/renderer/vulkan/vk_allocator.c
     src/renderer/vulkan/vk_buffer.c
     src/renderer/vulkan/vk_common.c
