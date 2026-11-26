@@ -15,7 +15,9 @@ typedef struct at_vk_image {
     VkExtent2D       extent;
 } at_vk_image;
 
-/* Creates a 2D image in fast GPU memory, plus a view of all of it. */
+/* Creates a 2D image in fast GPU memory, plus a view of all of it.   */
+/* Depth formats get a depth view, so the same function makes depth  */
+/* buffers (usage VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT).       */
 bool at_vk_image_create(at_vk_image         *image,
                         at_vk_allocator     *allocator,
                         const at_vk_context *context,
@@ -37,5 +39,18 @@ bool at_vk_image_upload(at_vk_image         *image,
                         at_vk_upload        *upload,
                         const at_vk_context *context,
                         const void          *pixels);
+
+/* True for depth formats, with or without stencil. */
+bool at_vk_format_has_depth(VkFormat format);
+
+/* True for formats with a stencil part (e.g. D24_UNORM_S8_UINT). */
+bool at_vk_format_has_stencil(VkFormat format);
+
+/* Parts of an image of this format: color, or depth (+ stencil). */
+VkImageAspectFlags at_vk_format_aspect(VkFormat format);
+
+/* Best depth format the GPU can draw into: D32_SFLOAT when supported,  */
+/* then formats with stencil, then D16. VK_FORMAT_UNDEFINED if none.    */
+VkFormat at_vk_choose_depth_format(const at_vk_context *context);
 
 #endif /* ARCHTYPE_VK_IMAGE_H */

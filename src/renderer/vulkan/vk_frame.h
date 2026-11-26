@@ -4,6 +4,7 @@
 /* Per-frame resources and the begin/end frame flow. */
 
 #include "renderer/vulkan/vk_context.h"
+#include "renderer/vulkan/vk_image.h"
 #include "renderer/vulkan/vk_swapchain.h"
 
 /* How many frames the CPU can prepare while the GPU is still drawing. */
@@ -31,11 +32,14 @@ bool at_vk_frames_create(at_vk_frames *frames, const at_vk_context *context);
 void at_vk_frames_destroy(at_vk_frames *frames, const at_vk_context *context);
 
 /* Waits for the frame slot, acquires a swapchain image and starts         */
-/* rendering into it, clearing it with clear_color (linear RGBA).          */
+/* rendering into it, clearing it with clear_color (linear RGBA) and the   */
+/* depth buffer to 1 (the far plane). depth_image must be the size of the  */
+/* swapchain.                                                              */
 /* Returns false if this frame must be skipped (e.g. swapchain out of date). */
 bool at_vk_frame_begin(at_vk_frames           *frames,
                        const at_vk_context    *context,
                        const at_vk_swapchain  *swapchain,
+                       const at_vk_image      *depth_image,
                        const float             clear_color[4]);
 
 /* Finishes rendering, submits the commands and presents the image. */

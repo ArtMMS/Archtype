@@ -6,6 +6,74 @@
 
 #define AT_VK_BYTES_PER_PIXEL 4
 
+/* ------------------------------------------------------------------------ */
+/* Formats                                                                   */
+/* ------------------------------------------------------------------------ */
+
+bool at_vk_format_has_depth(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_D16_UNORM:
+        case VK_FORMAT_X8_D24_UNORM_PACK32:
+        case VK_FORMAT_D32_SFLOAT:
+        case VK_FORMAT_D16_UNORM_S8_UINT:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool at_vk_format_has_stencil(VkFormat format) {
+    switch (format) {
+        case VK_FORMAT_S8_UINT:
+        case VK_FORMAT_D16_UNORM_S8_UINT:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            return true;
+        default:
+            return false;
+    }
+}
+
+VkImageAspectFlags at_vk_format_aspect(VkFormat format) {
+    VkImageAspectFlags aspect = 0;
+    if (at_vk_format_has_depth(format)) {
+        aspect |= VK_IMAGE_ASPECT_DEPTH_BIT;
+    }
+    if (at_vk_format_has_stencil(format)) {
+        aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+    }
+    return aspect != 0 ? aspect : VK_IMAGE_ASPECT_COLOR_BIT;
+}
+
+VkFormat at_vk_choose_depth_format(const at_vk_context *context) {
+    /* Every GPU supports at least one of these as a depth attachment */
+    const VkFormat candidates[] = {
+        VK_FORMAT_D32_SFLOAT,
+        VK_FORMAT_D32_SFLOAT_S8_UINT,
+        VK_FORMAT_D24_UNORM_S8_UINT,
+        VK_FORMAT_X8_D24_UNORM_PACK32,
+        VK_FORMAT_D16_UNORM,
+    };
+
+    for (size_t i = 0; i < sizeof(candidates) / sizeof(candidates[0]); ++i) {
+        VkFormatProperties properties;
+        vkGetPhysicalDeviceFormatProperties(context->physical_device, candidates[i],
+                                            &properties);
+        if (properties.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
+            return candidates[i];
+        }
+    }
+
+    fprintf(stderr, "[archtype] The GPU supports no depth buffer format\n");
+    return VK_FORMAT_UNDEFINED;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Images                                                                    */
+/* ------------------------------------------------------------------------ */
+
 static void transition_image(VkCommandBuffer       command_buffer,
                              VkImage               image,
                              VkImageLayout         old_layout,
@@ -94,7 +162,7 @@ bool at_vk_image_create(at_vk_image         *image,
     view_info.components.g                    = VK_COMPONENT_SWIZZLE_IDENTITY;
     view_info.components.b                    = VK_COMPONENT_SWIZZLE_IDENTITY;
     view_info.components.a                    = VK_COMPONENT_SWIZZLE_IDENTITY;
-    view_info.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    view_info.subresourceRange.aspectMask     = at_vk_format_aspect(format);
     view_info.subresourceRange.baseMipLevel   = 0;
     view_info.subresourceRange.levelCount     = 1;
     view_info.subresourceRange.baseArrayLayer = 0;

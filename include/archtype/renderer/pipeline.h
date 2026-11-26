@@ -84,7 +84,9 @@ typedef struct at_binding_desc {
 } at_binding_desc;
 
 /* Zero-initialize and fill only what you need: the defaults draw opaque, */
-/* unculled triangles without depth testing.                              */
+/* unculled triangles without depth testing, so they always cover what    */
+/* was drawn before (what 2D and HUDs need). 3D scenes usually want       */
+/* depth_test, depth_write and AT_CULL_BACK.                              */
 typedef struct at_pipeline_desc {
     at_shader            *vertex_shader;   /* Required */
     at_shader            *fragment_shader; /* Required */
@@ -103,9 +105,12 @@ typedef struct at_pipeline_desc {
     at_front_face         front_face;
     at_blend_mode         blend_mode;
 
-    /* Depth testing: takes effect once the renderer has a depth buffer. */
+    /* Depth buffer: one per window, cleared every frame to the far plane. */
+    /* A pixel passes the test if it is as close as, or closer than, what  */
+    /* is already there.                                                   */
     bool                  depth_test;      /* Hide pixels behind closer ones   */
-    bool                  depth_write;     /* Store this draw's depth          */
+    bool                  depth_write;     /* Store this draw's depth, so later */
+                                           /* draws can be hidden behind it    */
 } at_pipeline_desc;
 
 /* Creates a graphics pipeline. Returns NULL on failure. */

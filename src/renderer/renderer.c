@@ -22,6 +22,19 @@ static bool is_srgb_format(VkFormat format) {
     return format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB;
 }
 
+/* Depth buffer the size of the swapchain images. The previous one, if */
+/* any, must already be destroyed.                                     */
+static bool create_depth_image(at_renderer *renderer) {
+    bool ok = at_vk_image_create(&renderer->depth_image, &renderer->allocator,
+                                 &renderer->context, renderer->swapchain.extent.width,
+                                 renderer->swapchain.extent.height, renderer->depth_format,
+                                 VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+    if (!ok) {
+        fprintf(stderr, "[archtype] Failed to create the depth buffer\n");
+    }
+    return ok;
+}
+
 static bool recreate_swapchain(at_renderer *renderer, uint32_t width, uint32_t height) {
     /* The GPU may still be using the old images: wait until it is done */
     vkDeviceWaitIdle(renderer->context.device);
@@ -30,8 +43,20 @@ static bool recreate_swapchain(at_renderer *renderer, uint32_t width, uint32_t h
     renderer->swapchain_width    = width;
     renderer->swapchain_height   = height;
 
-    return at_vk_swapchain_recreate(&renderer->swapchain, &renderer->context,
-                                    width, height, renderer->vsync);
+    /* The depth buffer follows the swapchain size */
+    at_vk_image_destroy(&renderer->depth_image, &renderer->allocator, &renderer->context);
+
+    if (!at_vk_swapchain_recreate(&renderer->swapchain, &renderer->context,
+                                  width, height, renderer->vsync)) {
+        return false;
+    }
+
+    if (!create_depth_image(renderer)) {
+        /* Try again next frame, with a new swapchain */
+        renderer->frames.out_of_date = true;
+        return false;
+    }
+    return true;
 }
 
 /* Viewport and scissor are dynamic: they cover the whole window every frame, */
@@ -193,11 +218,15 @@ at_renderer *at_renderer_create(const at_renderer_desc *desc) {
     renderer->swapchain_width  = (uint32_t)width;
     renderer->swapchain_height = (uint32_t)height;
 
-    bool ok = at_vk_allocator_create(&renderer->allocator, &renderer->context)
+    renderer->depth_format = at_vk_choose_depth_format(&renderer->context);
+
+    bool ok = renderer->depth_format != VK_FORMAT_UNDEFINED
+           && at_vk_allocator_create(&renderer->allocator, &renderer->context)
            && at_vk_upload_create(&renderer->upload, &renderer->context)
            && at_vk_swapchain_create(&renderer->swapchain, &renderer->context,
                                      renderer->swapchain_width, renderer->swapchain_height,
                                      renderer->vsync)
+           && create_depth_image(renderer)
            && at_vk_frames_create(&renderer->frames, &renderer->context)
            && at_vk_descriptors_create(&renderer->descriptors, &renderer->context);
 
@@ -220,6 +249,7 @@ void at_renderer_destroy(at_renderer *renderer) {
         vkDeviceWaitIdle(renderer->context.device);
         at_vk_descriptors_destroy(&renderer->descriptors, &renderer->context);
         at_vk_frames_destroy(&renderer->frames, &renderer->context);
+        at_vk_image_destroy(&renderer->depth_image, &renderer->allocator, &renderer->context);
         at_vk_swapchain_destroy(&renderer->swapchain, &renderer->context);
         at_vk_upload_destroy(&renderer->upload, &renderer->context);
         at_vk_allocator_destroy(&renderer->allocator);
@@ -270,7 +300,8 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
                      || (uint32_t)height != renderer->swapchain_height;
 
     if (size_changed || renderer->frames.out_of_date ||
-        renderer->swapchain.handle == VK_NULL_HANDLE) {
+        renderer->swapchain.handle == VK_NULL_HANDLE ||
+        renderer->depth_image.handle == VK_NULL_HANDLE) {
         if (!recreate_swapchain(renderer, (uint32_t)width, (uint32_t)height)) {
             return false;
         }
@@ -287,7 +318,7 @@ bool at_renderer_begin_frame(at_renderer *renderer) {
     /* If this fails because the swapchain went out of date, it is */
     /* recreated at the start of the next frame.                   */
     if (!at_vk_frame_begin(&renderer->frames, &renderer->context,
-                           &renderer->swapchain, clear)) {
+                           &renderer->swapchain, &renderer->depth_image, clear)) {
         return false;
     }
 

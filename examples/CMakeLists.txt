@@ -102,3 +102,12 @@ target_link_libraries(stress2d_c PRIVATE Archtype::archtype)
 # 2D text with the built-in bitmap font: scales, colors, alignment, measuring
 add_executable(text2d_c c/text2d/main.c)
 target_link_libraries(text2d_c PRIVATE Archtype::archtype)
+
+# 3D camera: perspective projection, free fly camera (debug) and the depth
+# buffer, with a HUD drawn on top by the 2D renderer
+add_executable(camera3d_c c/camera3d/main.c)
+target_link_libraries(camera3d_c PRIVATE Archtype::archtype)
+archtype_add_shaders(camera3d_c
+    c/camera3d/camera3d.vert
+    c/camera3d/camera3d.frag
+)

@@ -273,7 +273,8 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     multisample.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
     multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    /* Ignored while the renderer has no depth buffer */
+    /* Depth test: a pixel is drawn if it is as close as, or closer than,  */
+    /* what the depth buffer holds (cleared to 1, the far plane, per frame) */
     VkPipelineDepthStencilStateCreateInfo depth_stencil;
     memset(&depth_stencil, 0, sizeof(depth_stencil));
     depth_stencil.sType            = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
@@ -298,7 +299,9 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     dynamic_state.pDynamicStates    = dynamic_states;
 
     /* Dynamic rendering: instead of a render pass, the pipeline just */
-    /* declares the formats of the images it draws into.             */
+    /* declares the formats of the images it draws into. Every frame  */
+    /* has a depth buffer, so every pipeline declares its format, even */
+    /* the ones that don't test depth (like the 2D renderer's).        */
     VkFormat color_format = renderer->swapchain.format;
 
     VkPipelineRenderingCreateInfo rendering_info;
@@ -306,7 +309,7 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     rendering_info.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     rendering_info.colorAttachmentCount    = 1;
     rendering_info.pColorAttachmentFormats = &color_format;
-    rendering_info.depthAttachmentFormat   = VK_FORMAT_UNDEFINED;
+    rendering_info.depthAttachmentFormat   = renderer->depth_format;
 
     VkGraphicsPipelineCreateInfo pipeline_info;
     memset(&pipeline_info, 0, sizeof(pipeline_info));

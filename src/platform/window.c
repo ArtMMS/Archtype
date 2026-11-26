@@ -25,6 +25,14 @@ struct at_window {
     uint64_t    mouse_pressed_batch[AT_MOUSE_BUTTON_COUNT]; /* Event batch of the last press */
     float       mouse_wheel;       /* Wheel turned during mouse_wheel_batch */
     uint64_t    mouse_wheel_batch;
+    float       mouse_dx;          /* Movement during mouse_delta_batch     */
+    float       mouse_dy;
+    uint64_t    mouse_delta_batch;
+    bool        mouse_captured;
+
+    /* Keyboard */
+    bool        key_down[AT_KEY_COUNT];
+    uint64_t    key_pressed_batch[AT_KEY_COUNT]; /* Event batch of the last press */
 };
 
 /* ------------------------------------------------------------------------ */
@@ -49,15 +57,79 @@ static int to_button_index(Uint8 button) {
     }
 }
 
+/* Engine key for an SDL scancode (the key's physical position) */
+static at_key to_key(SDL_Scancode scancode) {
+    if (scancode >= SDL_SCANCODE_A && scancode <= SDL_SCANCODE_Z) {
+        return (at_key)(AT_KEY_A + (scancode - SDL_SCANCODE_A));
+    }
+    if (scancode >= SDL_SCANCODE_1 && scancode <= SDL_SCANCODE_9) {
+        return (at_key)(AT_KEY_1 + (scancode - SDL_SCANCODE_1));
+    }
+    if (scancode >= SDL_SCANCODE_F1 && scancode <= SDL_SCANCODE_F12) {
+        return (at_key)(AT_KEY_F1 + (scancode - SDL_SCANCODE_F1));
+    }
+
+    switch (scancode) {
+        case SDL_SCANCODE_0:         return AT_KEY_0;
+        case SDL_SCANCODE_SPACE:     return AT_KEY_SPACE;
+        case SDL_SCANCODE_RETURN:    return AT_KEY_ENTER;
+        case SDL_SCANCODE_KP_ENTER:  return AT_KEY_ENTER;
+        case SDL_SCANCODE_ESCAPE:    return AT_KEY_ESCAPE;
+        case SDL_SCANCODE_TAB:       return AT_KEY_TAB;
+        case SDL_SCANCODE_BACKSPACE: return AT_KEY_BACKSPACE;
+        case SDL_SCANCODE_DELETE:    return AT_KEY_DELETE;
+        case SDL_SCANCODE_MINUS:     return AT_KEY_MINUS;
+        case SDL_SCANCODE_EQUALS:    return AT_KEY_EQUALS;
+        case SDL_SCANCODE_LEFT:      return AT_KEY_LEFT;
+        case SDL_SCANCODE_RIGHT:     return AT_KEY_RIGHT;
+        case SDL_SCANCODE_UP:        return AT_KEY_UP;
+        case SDL_SCANCODE_DOWN:      return AT_KEY_DOWN;
+        case SDL_SCANCODE_LSHIFT:    return AT_KEY_LEFT_SHIFT;
+        case SDL_SCANCODE_RSHIFT:    return AT_KEY_RIGHT_SHIFT;
+        case SDL_SCANCODE_LCTRL:     return AT_KEY_LEFT_CTRL;
+        case SDL_SCANCODE_RCTRL:     return AT_KEY_RIGHT_CTRL;
+        case SDL_SCANCODE_LALT:      return AT_KEY_LEFT_ALT;
+        case SDL_SCANCODE_RALT:      return AT_KEY_RIGHT_ALT;
+        default:                     return AT_KEY_UNKNOWN;
+    }
+}
+
+static float pixel_density(const at_window *window) {
+    float density = SDL_GetWindowPixelDensity(window->handle);
+    return density > 0.0f ? density : 1.0f;
+}
+
 /* SDL reports window coordinates; convert to framebuffer pixels, which */
 /* differ on high-DPI displays.                                         */
 static void set_mouse_position(at_window *window, float x, float y) {
-    float density = SDL_GetWindowPixelDensity(window->handle);
-    if (density <= 0.0f) {
-        density = 1.0f;
-    }
+    float density   = pixel_density(window);
     window->mouse_x = x * density;
     window->mouse_y = y * density;
+}
+
+/* Adds to the movement of the current batch of events */
+static void add_mouse_delta(at_window *window, float dx, float dy) {
+    uint64_t batch = at_platform_event_batch();
+    if (window->mouse_delta_batch != batch) {
+        window->mouse_dx          = 0.0f;
+        window->mouse_dy          = 0.0f;
+        window->mouse_delta_batch = batch;
+    }
+
+    float density     = pixel_density(window);
+    window->mouse_dx += dx * density;
+    window->mouse_dy += dy * density;
+}
+
+/* Lets go of every key and button, e.g. when the window loses focus and */
+/* would never see them being released.                                  */
+static void release_all_input(at_window *window) {
+    for (int i = 0; i < AT_KEY_COUNT; ++i) {
+        window->key_down[i] = false;
+    }
+    for (int i = 0; i < AT_MOUSE_BUTTON_COUNT; ++i) {
+        window->mouse_down[i] = false;
+    }
 }
 
 /* ------------------------------------------------------------------------ */
@@ -84,10 +156,36 @@ void at_window_handle_event(const SDL_Event *event) {
             }
             break;
 
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            window = find_window(event->window.windowID);
+            if (window) {
+                release_all_input(window);
+            }
+            break;
+
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP: {
+            window     = find_window(event->key.windowID);
+            at_key key = to_key(event->key.scancode);
+            if (!window || key == AT_KEY_UNKNOWN) {
+                break;
+            }
+
+            bool down = event->type == SDL_EVENT_KEY_DOWN;
+            window->key_down[key] = down;
+
+            /* Holding a key repeats KEY_DOWN events: only the first one is a press */
+            if (down && !event->key.repeat) {
+                window->key_pressed_batch[key] = at_platform_event_batch();
+            }
+            break;
+        }
+
         case SDL_EVENT_MOUSE_MOTION:
             window = find_window(event->motion.windowID);
             if (window) {
                 set_mouse_position(window, event->motion.x, event->motion.y);
+                add_mouse_delta(window, event->motion.xrel, event->motion.yrel);
             }
             break;
 
@@ -192,6 +290,9 @@ void at_window_destroy(at_window *window) {
         return;
     }
 
+    if (window->mouse_captured) {
+        SDL_SetWindowRelativeMouseMode(window->handle, false);
+    }
     SDL_DestroyWindow(window->handle);
     free(window);
 }
@@ -229,6 +330,26 @@ bool at_window_is_minimized(const at_window *window) {
         || window->height == 0;
 }
 
+bool at_window_is_key_down(const at_window *window, at_key key) {
+    if ((int)key <= AT_KEY_UNKNOWN || (int)key >= AT_KEY_COUNT) {
+        return false;
+    }
+
+    /* Like mouse buttons: a key pressed and released within the last batch */
+    /* of events still counts as "down" once, so quick taps are not lost.   */
+    uint64_t pressed = window->key_pressed_batch[key];
+    return window->key_down[key] || (pressed != 0 && pressed == at_platform_event_batch());
+}
+
+bool at_window_was_key_pressed(const at_window *window, at_key key) {
+    if ((int)key <= AT_KEY_UNKNOWN || (int)key >= AT_KEY_COUNT) {
+        return false;
+    }
+
+    uint64_t pressed = window->key_pressed_batch[key];
+    return pressed != 0 && pressed == at_platform_event_batch();
+}
+
 void at_window_get_mouse_position(const at_window *window, float *x, float *y) {
     if (x) {
         *x = window->mouse_x;
@@ -251,9 +372,38 @@ bool at_window_is_mouse_button_down(const at_window *window, at_mouse_button but
         || (pressed != 0 && pressed == at_platform_event_batch());
 }
 
+void at_window_get_mouse_delta(const at_window *window, float *dx, float *dy) {
+    /* Only the movement of the latest batch of events counts */
+    bool current = window->mouse_delta_batch == at_platform_event_batch();
+    if (dx) {
+        *dx = current ? window->mouse_dx : 0.0f;
+    }
+    if (dy) {
+        *dy = current ? window->mouse_dy : 0.0f;
+    }
+}
+
 float at_window_get_mouse_wheel(const at_window *window) {
     /* Only the wheel turned in the latest batch of events counts */
     return window->mouse_wheel_batch == at_platform_event_batch() ? window->mouse_wheel : 0.0f;
+}
+
+void at_window_set_mouse_captured(at_window *window, bool captured) {
+    if (window->mouse_captured == captured) {
+        return;
+    }
+
+    /* Relative mode: hidden cursor, confined to the window, raw movement */
+    if (!SDL_SetWindowRelativeMouseMode(window->handle, captured)) {
+        fprintf(stderr, "[archtype] Failed to %s the mouse: %s\n",
+                captured ? "capture" : "release", SDL_GetError());
+        return;
+    }
+    window->mouse_captured = captured;
+}
+
+bool at_window_is_mouse_captured(const at_window *window) {
+    return window->mouse_captured;
 }
 
 /* ------------------------------------------------------------------------ */

@@ -9,6 +9,7 @@
 /* Changes an image's layout and orders the work before and after it. */
 static void transition_image(VkCommandBuffer       command_buffer,
                              VkImage               image,
+                             VkImageAspectFlags    aspect,
                              VkImageLayout         old_layout,
                              VkImageLayout         new_layout,
                              VkPipelineStageFlags2 src_stage,
@@ -27,7 +28,7 @@ static void transition_image(VkCommandBuffer       command_buffer,
     barrier.srcQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
     barrier.image                           = image;
-    barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.aspectMask     = aspect;
     barrier.subresourceRange.baseMipLevel   = 0;
     barrier.subresourceRange.levelCount     = 1;
     barrier.subresourceRange.baseArrayLayer = 0;
@@ -141,6 +142,7 @@ void at_vk_frames_destroy(at_vk_frames *frames, const at_vk_context *context) {
 bool at_vk_frame_begin(at_vk_frames           *frames,
                        const at_vk_context    *context,
                        const at_vk_swapchain  *swapchain,
+                       const at_vk_image      *depth_image,
                        const float             clear_color[4]) {
     at_vk_frame *frame = &frames->frames[frames->current];
 
@@ -185,14 +187,30 @@ bool at_vk_frame_begin(at_vk_frames           *frames,
 
     /* 4. Make the image ready to be drawn into. The old contents don't   */
     /*    matter (UNDEFINED) because the whole image is cleared next.     */
-    transition_image(command_buffer, image,
+    transition_image(command_buffer, image, VK_IMAGE_ASPECT_COLOR_BIT,
                      VK_IMAGE_LAYOUT_UNDEFINED,
                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
 
-    /* 5. Begin dynamic rendering: clears the image with clear_color */
+    /* The depth buffer too. It is shared by every frame in flight, so the */
+    /* barrier also waits for the previous frame's depth tests to finish   */
+    /* before this frame clears it.                                        */
+    transition_image(command_buffer, depth_image->handle,
+                     at_vk_format_aspect(depth_image->format),
+                     VK_IMAGE_LAYOUT_UNDEFINED,
+                     VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                     VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT |
+                         VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                     VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                         VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+
+    /* 5. Begin dynamic rendering: clears the image with clear_color and */
+    /*    the depth buffer to 1 (everything is in front of the far plane) */
     VkRenderingAttachmentInfo color_attachment;
     memset(&color_attachment, 0, sizeof(color_attachment));
     color_attachment.sType       = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -205,6 +223,16 @@ bool at_vk_frame_begin(at_vk_frames           *frames,
     color_attachment.clearValue.color.float32[2] = clear_color[2];
     color_attachment.clearValue.color.float32[3] = clear_color[3];
 
+    /* The depth values are only needed while drawing: not stored afterwards */
+    VkRenderingAttachmentInfo depth_attachment;
+    memset(&depth_attachment, 0, sizeof(depth_attachment));
+    depth_attachment.sType                         = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depth_attachment.imageView                     = depth_image->view;
+    depth_attachment.imageLayout                   = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    depth_attachment.loadOp                        = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment.storeOp                       = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.clearValue.depthStencil.depth = 1.0f;
+
     VkRenderingInfo rendering_info;
     memset(&rendering_info, 0, sizeof(rendering_info));
     rendering_info.sType                = VK_STRUCTURE_TYPE_RENDERING_INFO;
@@ -214,6 +242,7 @@ bool at_vk_frame_begin(at_vk_frames           *frames,
     rendering_info.layerCount           = 1;
     rendering_info.colorAttachmentCount = 1;
     rendering_info.pColorAttachments    = &color_attachment;
+    rendering_info.pDepthAttachment     = &depth_attachment;
 
     vkCmdBeginRendering(command_buffer, &rendering_info);
 
@@ -232,7 +261,7 @@ void at_vk_frame_end(at_vk_frames          *frames,
     /* 1. Finish rendering and make the image ready to be shown */
     vkCmdEndRendering(command_buffer);
 
-    transition_image(command_buffer, image,
+    transition_image(command_buffer, image, VK_IMAGE_ASPECT_COLOR_BIT,
                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                      VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,

@@ -43,6 +43,8 @@ struct at_renderer {
     at_vk_allocator    allocator;
     at_vk_upload       upload;
     at_vk_swapchain    swapchain;
+    at_vk_image        depth_image;  /* Same size as the swapchain, recreated with it */
+    VkFormat           depth_format; /* Format of depth_image, used by every pipeline */
     at_vk_frames       frames;
     at_vk_descriptors  descriptors;
 };
