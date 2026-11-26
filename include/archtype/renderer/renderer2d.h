@@ -5,6 +5,7 @@
 #include "archtype/math/vec.h"
 #include "archtype/renderer/camera2d.h"
 #include "archtype/renderer/color.h"
+#include "archtype/renderer/pipeline.h"
 #include "archtype/renderer/renderer.h"
 #include "archtype/renderer/texture.h"
 
@@ -14,11 +15,23 @@ AT_EXTERN_C_BEGIN
  * 2D renderer: draws shapes and sprites in world space, seen through an
  * at_camera2d.
  *
- * Nothing is drawn one by one: shapes and sprites are collected in a vertex
- * buffer and sent to the GPU together (batching), in the order they were
- * drawn. Later ones are drawn on top of earlier ones, and alpha is blended.
- * Every change of texture starts a new batch (one more draw call), so draw
- * things that share a texture one after another when you can.
+ * Nothing is drawn right away: shapes and sprites are collected between
+ * begin and end, and at_renderer2d_end sends them to the GPU together.
+ *
+ * Draw order (what ends up on top):
+ *   - Higher layers are drawn over lower ones (at_renderer2d_set_layer).
+ *   - In the same layer, later draws go over earlier ones.
+ *   - So you can draw in any order: e.g. each character's shadow (layer 0)
+ *     and then the character (layer 1), one after another, and all the
+ *     shadows still end up below all the characters.
+ *
+ * Batching: after sorting, everything in a row that uses the same texture
+ * and blend mode is drawn with one draw call. Shapes all share one texture,
+ * so they batch with each other.
+ *
+ * Transparency: the alpha of colors and textures is blended by default
+ * (AT_BLEND_ALPHA). at_renderer2d_set_blend_mode also offers additive
+ * blending (glows, light, particles) and opaque drawing.
  *
  * Usage, every frame:
  *
@@ -31,7 +44,8 @@ AT_EXTERN_C_BEGIN
  *   }
  *
  * begin/end can be used more than once per frame, e.g. once with the world
- * camera and once with a fixed camera for the HUD.
+ * camera and once with a fixed camera for the HUD. Layers only sort inside
+ * one begin/end: everything in a later begin/end is drawn on top.
  *
  * at_renderer2d_end binds its own pipeline: after it, bind your pipeline
  * again before calling at_renderer_draw or at_renderer_draw_indexed.
@@ -48,6 +62,7 @@ typedef struct at_renderer2d at_renderer2d;
 typedef struct at_renderer2d_desc {
     /* Most vertices drawn per frame (0 = AT_RENDERER2D_DEFAULT_MAX_VERTICES). */
     /* A sprite, rectangle or line uses 6, a triangle 3, a circle 3 per segment. */
+    /* Memory: about 70 bytes per vertex (GPU buffers and the CPU copy).       */
     uint32_t max_vertices;
 } at_renderer2d_desc;
 
@@ -62,8 +77,29 @@ AT_API void at_renderer2d_destroy(at_renderer2d *renderer2d);
 /* Only valid between at_renderer_begin_frame and at_renderer_end_frame.    */
 AT_API void at_renderer2d_begin(at_renderer2d *renderer2d, const at_camera2d *camera);
 
-/* Sends everything drawn since begin to the GPU. */
+/* Sorts everything drawn since begin by layer and sends it to the GPU. */
 AT_API void at_renderer2d_end(at_renderer2d *renderer2d);
+
+/* ------------------------------------------------------------------------ */
+/* Draw state: applies to the next shapes and sprites, until changed.       */
+/* at_renderer2d_begin resets it to layer 0 and AT_BLEND_ALPHA.             */
+/* ------------------------------------------------------------------------ */
+
+/* Layer of the next draws. Higher layers are drawn on top. Any int32_t,  */
+/* negative too: e.g. -1 background, 0 world, 10 effects. For top-down    */
+/* games, a layer from the Y position (-(int32_t)y) puts things lower on  */
+/* the screen in front.                                                   */
+AT_API void at_renderer2d_set_layer(at_renderer2d *renderer2d, int32_t layer);
+
+AT_API int32_t at_renderer2d_get_layer(const at_renderer2d *renderer2d);
+
+/* How the next draws are combined with what is under them:               */
+/*   AT_BLEND_ALPHA     transparency from the alpha (default)             */
+/*   AT_BLEND_ADDITIVE  colors are added: glows, fire, light, particles   */
+/*   AT_BLEND_NONE      opaque: alpha is ignored                          */
+AT_API void at_renderer2d_set_blend_mode(at_renderer2d *renderer2d, at_blend_mode mode);
+
+AT_API at_blend_mode at_renderer2d_get_blend_mode(const at_renderer2d *renderer2d);
 
 /* ------------------------------------------------------------------------ */
 /* Sprites                                                                   */
