@@ -98,3 +98,7 @@ endif()
 # versus one texture per image
 add_executable(stress2d_c c/stress2d/main.c)
 target_link_libraries(stress2d_c PRIVATE Archtype::archtype)
+
+# 2D text with the built-in bitmap font: scales, colors, alignment, measuring
+add_executable(text2d_c c/text2d/main.c)
+target_link_libraries(text2d_c PRIVATE Archtype::archtype)

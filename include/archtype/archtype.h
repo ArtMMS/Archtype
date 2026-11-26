@@ -22,6 +22,7 @@
 #include "archtype/renderer/renderer2d.h"
 #include "archtype/renderer/sprite_sheet.h"
 #include "archtype/renderer/texture_atlas.h"
+#include "archtype/renderer/font.h"
 #include "archtype/renderer/buffer.h"
 #include "archtype/renderer/texture.h"
 #include "archtype/renderer/shader.h"

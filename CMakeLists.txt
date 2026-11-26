@@ -135,6 +135,7 @@ add_library(archtype
     src/platform/window.c
     src/renderer/buffer.c
     src/renderer/camera2d.c
+    src/renderer/font.c
     src/renderer/image_loader.c
     src/renderer/pipeline.c
     src/renderer/renderer.c
