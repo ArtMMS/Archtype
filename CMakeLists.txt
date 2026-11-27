@@ -144,6 +144,7 @@ add_library(archtype
     src/renderer/pipeline.c
     src/renderer/renderer.c
     src/renderer/renderer2d.c
+    src/renderer/renderer3d.c
     src/renderer/shader.c
     src/renderer/texture.c
     src/renderer/texture_atlas.c
@@ -160,10 +161,12 @@ add_library(archtype
 )
 add_library(Archtype::archtype ALIAS archtype)
 
-# Engine shaders (2D renderer...), compiled into the library as C arrays
+# Engine shaders (2D and 3D renderers), compiled into the library as C arrays
 archtype_embed_shaders(archtype
     src/renderer/shaders/renderer2d.vert
     src/renderer/shaders/renderer2d.frag
+    src/renderer/shaders/renderer3d.vert
+    src/renderer/shaders/renderer3d.frag
 )
 
 target_include_directories(archtype

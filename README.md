@@ -120,6 +120,7 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `text2d_c` | Text with the built-in bitmap font: scales, colors, alignment, measuring and a stats HUD. |
 | `camera3d_c` | 3D perspective camera with a free fly camera (right mouse button to look, WASD to move) and the depth buffer, with a 2D HUD on top. |
 | `meshes3d_c` | Primitive meshes (cube, plane, sphere) with debug views of their normals, texture coordinates and tangents (Tab or 1 to 4). |
+| `scene3d_c` | A scene drawn with the engine's 3D renderer, with no shaders of its own; Tab adds a crowd of 2500 cubes to watch the draw calls. |
 
 
 ## Technologies
@@ -159,7 +160,7 @@ GPU memory is managed by Archtype's own allocator, written in C99 (`src/renderer
 
 ### Shaders
 
-Shaders are written in **GLSL** and compiled to **SPIR-V** at build time with **glslc** (included in the Vulkan SDK). The examples' compiled `.spv` files are placed next to the executables and loaded at runtime. The engine's own shaders (such as the 2D renderer's) are compiled into the library as C arrays, so games don't need to ship them.
+Shaders are written in **GLSL** and compiled to **SPIR-V** at build time with **glslc** (included in the Vulkan SDK). The examples' compiled `.spv` files are placed next to the executables and loaded at runtime. The engine's own shaders (such as the 2D and 3D renderers') are compiled into the library as C arrays, so games don't need to ship them.
 
 
 ## 📋 License

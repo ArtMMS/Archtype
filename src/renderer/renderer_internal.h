@@ -31,9 +31,12 @@ struct at_renderer {
     bool               frame_started;
     at_pipeline       *bound_pipeline;
     bool               index_buffer_bound;
-    at_buffer         *bound_buffers[AT_MAX_BINDINGS];  /* Uniform buffers by binding */
-    at_texture        *bound_textures[AT_MAX_BINDINGS]; /* Textures by binding        */
-    bool               descriptors_dirty; /* Bindings changed since the last draw */
+
+    /* Resources by set and binding, and which sets changed since the */
+    /* last draw (their descriptor sets must be rebuilt)              */
+    at_buffer         *bound_buffers[AT_MAX_DESCRIPTOR_SETS][AT_MAX_BINDINGS];
+    at_texture        *bound_textures[AT_MAX_DESCRIPTOR_SETS][AT_MAX_BINDINGS];
+    bool               descriptors_dirty[AT_MAX_DESCRIPTOR_SETS];
 
     /* Window size used to build the current swapchain, to detect resizes */
     uint32_t           swapchain_width;
@@ -56,9 +59,14 @@ struct at_shader {
 struct at_pipeline {
     VkPipeline            handle;
     VkPipelineLayout      layout;
-    VkDescriptorSetLayout set_layout;          /* VK_NULL_HANDLE if no bindings */
+
+    /* One layout per set, from 0 to the highest set used. A set with no */
+    /* bindings (skipped by the shaders) gets an empty layout.           */
+    VkDescriptorSetLayout set_layouts[AT_MAX_DESCRIPTOR_SETS];
+    uint32_t              set_count;           /* 0 if the pipeline has no bindings */
+
     uint32_t              binding_count;
-    at_binding_desc       bindings[AT_MAX_BINDINGS];
+    at_binding_desc       bindings[AT_MAX_PIPELINE_BINDINGS];
     uint32_t              push_constant_size;
 };
 

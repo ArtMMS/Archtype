@@ -120,3 +120,8 @@ archtype_add_shaders(meshes3d_c
     c/meshes3d/meshes3d.vert
     c/meshes3d/meshes3d.frag
 )
+
+# 3D renderer: a scene drawn with the engine's built-in 3D shaders, so there
+# are no shaders to compile here. Tab adds a crowd of cubes (draw calls).
+add_executable(scene3d_c c/scene3d/main.c)
+target_link_libraries(scene3d_c PRIVATE Archtype::archtype)

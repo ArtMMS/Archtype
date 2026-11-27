@@ -63,10 +63,22 @@ AT_API void at_renderer_bind_index_buffer(at_renderer *renderer, at_buffer *buff
 AT_API void at_renderer_bind_uniform_buffer(at_renderer *renderer, uint32_t binding,
                                             at_buffer *buffer);
 
+/* Same, for "layout(set = S, binding = N)". */
+AT_API void at_renderer_bind_uniform_buffer_in_set(at_renderer *renderer, uint32_t set,
+                                                   uint32_t binding, at_buffer *buffer);
+
 /* Connects a texture to "layout(set = 0, binding = N) uniform sampler2D" */
 /* in the shaders. The binding must be declared in the pipeline.         */
 AT_API void at_renderer_bind_texture(at_renderer *renderer, uint32_t binding,
                                      at_texture *texture);
+
+/* Same, for "layout(set = S, binding = N) uniform sampler2D". */
+AT_API void at_renderer_bind_texture_in_set(at_renderer *renderer, uint32_t set,
+                                            uint32_t binding, at_texture *texture);
+
+/* Bound resources stay bound for the rest of the frame, also across   */
+/* pipelines. Changing one only rebuilds its set, at the next draw;    */
+/* binding the same resource again in the same place costs nothing.    */
 
 /* Sends a small block of data (up to the pipeline's push_constant_size) */
 /* straight to the shaders' push_constant block. Fast: meant to change   */

@@ -7,9 +7,11 @@
 
 AT_EXTERN_C_BEGIN
 
-#define AT_MAX_VERTEX_ATTRIBUTES 8
-#define AT_MAX_BINDINGS          8   /* Resource bindings per pipeline (set 0)  */
-#define AT_MAX_PUSH_CONSTANTS    128 /* Bytes, guaranteed by every Vulkan GPU */
+#define AT_MAX_VERTEX_ATTRIBUTES  8
+#define AT_MAX_DESCRIPTOR_SETS    4   /* Sets per pipeline: layout(set = 0..3)          */
+#define AT_MAX_BINDINGS           8   /* Binding numbers per set: layout(binding = 0..7) */
+#define AT_MAX_PIPELINE_BINDINGS  16  /* Bindings per pipeline, over all its sets       */
+#define AT_MAX_PUSH_CONSTANTS     128 /* Bytes, guaranteed by every Vulkan GPU          */
 
 /* How vertices are assembled into primitives. */
 typedef enum at_primitive_topology {
@@ -72,15 +74,24 @@ typedef enum at_shader_stage {
 
 /* Kind of resource a shader binding reads. */
 typedef enum at_binding_type {
-    AT_BINDING_UNIFORM_BUFFER = 0, /* layout(set = 0, binding = N) uniform Block { ... } */
-    AT_BINDING_TEXTURE             /* layout(set = 0, binding = N) uniform sampler2D ... */
+    AT_BINDING_UNIFORM_BUFFER = 0, /* layout(set = S, binding = N) uniform Block { ... } */
+    AT_BINDING_TEXTURE             /* layout(set = S, binding = N) uniform sampler2D ... */
 } at_binding_type;
 
-/* One resource the shaders use, e.g. the camera uniform buffer or a texture. */
+/*
+ * One resource the shaders use, e.g. the camera uniform buffer or a texture.
+ *
+ * Resources are grouped in descriptor sets (layout(set = S)). Each set is
+ * rebuilt on its own when one of its resources changes, so grouping them
+ * by how often they change saves work: e.g. set 0 for what changes once
+ * per frame (the camera), set 1 for what changes from one material to the
+ * next (its textures). Leave set at 0 when one set is enough.
+ */
 typedef struct at_binding_desc {
-    uint32_t        binding;       /* N in layout(set = 0, binding = N)              */
+    uint32_t        binding;       /* N in layout(binding = N), 0..7                 */
     at_binding_type type;
     uint32_t        stages;        /* at_shader_stage flags; 0 = vertex and fragment */
+    uint32_t        set;           /* S in layout(set = S), 0..3 (default 0)         */
 } at_binding_desc;
 
 /* Zero-initialize and fill only what you need: the defaults draw opaque, */
@@ -92,9 +103,10 @@ typedef struct at_pipeline_desc {
     at_shader            *fragment_shader; /* Required */
     at_vertex_layout      vertex_layout;
 
-    /* Resources (uniform buffers, textures) read by the shaders, in set 0 */
+    /* Resources (uniform buffers, textures) read by the shaders. Each   */
+    /* (set, binding) pair may appear only once.                          */
     uint32_t              binding_count;
-    at_binding_desc       bindings[AT_MAX_BINDINGS];
+    at_binding_desc       bindings[AT_MAX_PIPELINE_BINDINGS];
 
     /* Size in bytes of the shaders' push_constant block (0 = none,   */
     /* max AT_MAX_PUSH_CONSTANTS). Visible to vertex and fragment.    */

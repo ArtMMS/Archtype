@@ -106,6 +106,98 @@ static VkPipelineColorBlendAttachmentState make_blend_state(at_blend_mode mode) 
 }
 
 /* ------------------------------------------------------------------------ */
+/* Helpers                                                                   */
+/* ------------------------------------------------------------------------ */
+
+/* Checks the bindings and returns how many sets the pipeline needs (the */
+/* highest set used + 1), or -1 if a binding is invalid.                 */
+static int count_sets(const at_pipeline_desc *desc) {
+    if (desc->binding_count > AT_MAX_PIPELINE_BINDINGS) {
+        fprintf(stderr, "[archtype] Too many pipeline bindings (max %d)\n",
+                AT_MAX_PIPELINE_BINDINGS);
+        return -1;
+    }
+
+    uint32_t set_count = 0;
+    for (uint32_t i = 0; i < desc->binding_count; ++i) {
+        const at_binding_desc *binding = &desc->bindings[i];
+
+        if (binding->set >= AT_MAX_DESCRIPTOR_SETS) {
+            fprintf(stderr, "[archtype] Binding %u is in set %u, out of range (max %d)\n",
+                    binding->binding, binding->set, AT_MAX_DESCRIPTOR_SETS - 1);
+            return -1;
+        }
+        if (binding->binding >= AT_MAX_BINDINGS) {
+            fprintf(stderr, "[archtype] Binding %u of set %u is out of range (max %d)\n",
+                    binding->binding, binding->set, AT_MAX_BINDINGS - 1);
+            return -1;
+        }
+        for (uint32_t j = 0; j < i; ++j) {
+            if (desc->bindings[j].set == binding->set &&
+                desc->bindings[j].binding == binding->binding) {
+                fprintf(stderr, "[archtype] Set %u, binding %u is declared twice\n",
+                        binding->set, binding->binding);
+                return -1;
+            }
+        }
+
+        if (binding->set + 1 > set_count) {
+            set_count = binding->set + 1;
+        }
+    }
+
+    return (int)set_count;
+}
+
+/* Destroys the pipeline layout and the set layouts created so far */
+static void destroy_layouts(VkDevice device, at_pipeline *pipeline) {
+    if (pipeline->layout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipeline->layout, NULL);
+        pipeline->layout = VK_NULL_HANDLE;
+    }
+    for (uint32_t set = 0; set < AT_MAX_DESCRIPTOR_SETS; ++set) {
+        if (pipeline->set_layouts[set] != VK_NULL_HANDLE) {
+            vkDestroyDescriptorSetLayout(device, pipeline->set_layouts[set], NULL);
+            pipeline->set_layouts[set] = VK_NULL_HANDLE;
+        }
+    }
+}
+
+/* Descriptor set layout of one set: the pipeline's bindings in that set */
+static bool create_set_layout(VkDevice device, at_pipeline *pipeline, uint32_t set) {
+    VkDescriptorSetLayoutBinding set_bindings[AT_MAX_PIPELINE_BINDINGS];
+    uint32_t                     count = 0;
+    memset(set_bindings, 0, sizeof(set_bindings));
+
+    for (uint32_t i = 0; i < pipeline->binding_count; ++i) {
+        const at_binding_desc *binding = &pipeline->bindings[i];
+        if (binding->set != set) {
+            continue;
+        }
+
+        set_bindings[count].binding         = binding->binding;
+        set_bindings[count].descriptorType  = to_vk_descriptor_type(binding->type);
+        set_bindings[count].descriptorCount = 1;
+        set_bindings[count].stageFlags      = to_vk_stages(binding->stages);
+        count++;
+    }
+
+    VkDescriptorSetLayoutCreateInfo info;
+    memset(&info, 0, sizeof(info));
+    info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = count;
+    info.pBindings    = count > 0 ? set_bindings : NULL;
+
+    VkResult result = vkCreateDescriptorSetLayout(device, &info, NULL,
+                                                  &pipeline->set_layouts[set]);
+    if (result != VK_SUCCESS) {
+        AT_VK_LOG_ERROR("vkCreateDescriptorSetLayout", result);
+        return false;
+    }
+    return true;
+}
+
+/* ------------------------------------------------------------------------ */
 /* Public functions                                                          */
 /* ------------------------------------------------------------------------ */
 
@@ -124,16 +216,9 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
         return NULL;
     }
 
-    if (desc->binding_count > AT_MAX_BINDINGS) {
-        fprintf(stderr, "[archtype] Too many pipeline bindings (max %d)\n", AT_MAX_BINDINGS);
+    int set_count = count_sets(desc);
+    if (set_count < 0) {
         return NULL;
-    }
-    for (uint32_t i = 0; i < desc->binding_count; ++i) {
-        if (desc->bindings[i].binding >= AT_MAX_BINDINGS) {
-            fprintf(stderr, "[archtype] Binding %u is out of range (max %d)\n",
-                    desc->bindings[i].binding, AT_MAX_BINDINGS - 1);
-            return NULL;
-        }
     }
 
     if (desc->push_constant_size > AT_MAX_PUSH_CONSTANTS || desc->push_constant_size % 4 != 0) {
@@ -151,37 +236,21 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     VkDevice device = renderer->context.device;
     VkResult result = VK_SUCCESS;
 
+    pipeline->set_count          = (uint32_t)set_count;
     pipeline->binding_count      = desc->binding_count;
     pipeline->push_constant_size = desc->push_constant_size;
     memcpy(pipeline->bindings, desc->bindings, sizeof(pipeline->bindings));
 
-    /* Descriptor set layout: the resources the shaders read in set 0 */
-    if (desc->binding_count > 0) {
-        VkDescriptorSetLayoutBinding set_bindings[AT_MAX_BINDINGS];
-        memset(set_bindings, 0, sizeof(set_bindings));
-
-        for (uint32_t i = 0; i < desc->binding_count; ++i) {
-            set_bindings[i].binding         = desc->bindings[i].binding;
-            set_bindings[i].descriptorType  = to_vk_descriptor_type(desc->bindings[i].type);
-            set_bindings[i].descriptorCount = 1;
-            set_bindings[i].stageFlags      = to_vk_stages(desc->bindings[i].stages);
-        }
-
-        VkDescriptorSetLayoutCreateInfo set_info;
-        memset(&set_info, 0, sizeof(set_info));
-        set_info.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        set_info.bindingCount = desc->binding_count;
-        set_info.pBindings    = set_bindings;
-
-        result = vkCreateDescriptorSetLayout(device, &set_info, NULL, &pipeline->set_layout);
-        if (result != VK_SUCCESS) {
-            AT_VK_LOG_ERROR("vkCreateDescriptorSetLayout", result);
+    /* Descriptor set layouts: the resources the shaders read, set by set */
+    for (uint32_t set = 0; set < pipeline->set_count; ++set) {
+        if (!create_set_layout(device, pipeline, set)) {
+            destroy_layouts(device, pipeline);
             free(pipeline);
             return NULL;
         }
     }
 
-    /* Pipeline layout: descriptor set 0 and the push constant block */
+    /* Pipeline layout: the descriptor sets and the push constant block */
     VkPushConstantRange push_range;
     push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     push_range.offset     = 0;
@@ -190,9 +259,9 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     VkPipelineLayoutCreateInfo layout_info;
     memset(&layout_info, 0, sizeof(layout_info));
     layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    if (pipeline->set_layout != VK_NULL_HANDLE) {
-        layout_info.setLayoutCount = 1;
-        layout_info.pSetLayouts    = &pipeline->set_layout;
+    if (pipeline->set_count > 0) {
+        layout_info.setLayoutCount = pipeline->set_count;
+        layout_info.pSetLayouts    = pipeline->set_layouts;
     }
     if (desc->push_constant_size > 0) {
         layout_info.pushConstantRangeCount = 1;
@@ -202,9 +271,8 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
     result = vkCreatePipelineLayout(device, &layout_info, NULL, &pipeline->layout);
     if (result != VK_SUCCESS) {
         AT_VK_LOG_ERROR("vkCreatePipelineLayout", result);
-        if (pipeline->set_layout != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(device, pipeline->set_layout, NULL);
-        }
+        pipeline->layout = VK_NULL_HANDLE;
+        destroy_layouts(device, pipeline);
         free(pipeline);
         return NULL;
     }
@@ -332,10 +400,7 @@ at_pipeline *at_pipeline_create(at_renderer *renderer, const at_pipeline_desc *d
                                        &pipeline->handle);
     if (result != VK_SUCCESS) {
         AT_VK_LOG_ERROR("vkCreateGraphicsPipelines", result);
-        vkDestroyPipelineLayout(device, pipeline->layout, NULL);
-        if (pipeline->set_layout != VK_NULL_HANDLE) {
-            vkDestroyDescriptorSetLayout(device, pipeline->set_layout, NULL);
-        }
+        destroy_layouts(device, pipeline);
         free(pipeline);
         return NULL;
     }
@@ -354,9 +419,6 @@ void at_pipeline_destroy(at_renderer *renderer, at_pipeline *pipeline) {
     vkDeviceWaitIdle(device);
 
     vkDestroyPipeline(device, pipeline->handle, NULL);
-    vkDestroyPipelineLayout(device, pipeline->layout, NULL);
-    if (pipeline->set_layout != VK_NULL_HANDLE) {
-        vkDestroyDescriptorSetLayout(device, pipeline->set_layout, NULL);
-    }
+    destroy_layouts(device, pipeline);
     free(pipeline);
 }
