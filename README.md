@@ -2,7 +2,7 @@
 # Archtype
 
 <p align="center">
-  <img src="assets/archtype_logo.svg" alt="Archtype Logo" width="LARGURA">
+  <img src="assets/archtype_logo.svg" alt="Archtype Logo" width="320">
 </p>
 
 <p align="center">
@@ -118,17 +118,14 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `atlas2d_c` | Sprite sheets, frame animations and a texture atlas packed at runtime. Packs `c/texture/image.png` when it exists. |
 | `stress2d_c` | Batching stress test with up to 100k sprites: draw calls with an atlas versus one texture per image. |
 | `text2d_c` | Text with the built-in bitmap font: scales, colors, alignment, measuring and a stats HUD. |
+| `camera3d_c` | 3D perspective camera with a free fly camera (right mouse button to look, WASD to move) and the depth buffer, with a 2D HUD on top. |
 
 
 ## Technologies
 
 ### Language and API
 
-<<<<<<< HEAD
-- **C99** | The engine is implemented in C99. Its public API supports C++ projects through C-compatible headers. An optional C++ example can be enabled with `-DARCHTYPE_BUILD_CPP_EXAMPLE=ON`; it is excluded from the default build. **Lua** support is planned through bindings.
-=======
 - **C99** | The engine is written in strict C99 (`-std=c99`). Its public headers are wrapped in `extern "C"`, so games can be written in **C** or **C++**. **Lua** support is planned through bindings.
->>>>>>> f6c0c58 (Replace stb_image with SDL3_image and document the build)
 - **Vulkan 1.3** | Graphics API. The renderer uses Vulkan 1.3 features: **dynamic rendering** (no render pass or framebuffer objects) and **synchronization2** (simpler barriers and queue submits).
 
 ### Build
@@ -161,7 +158,7 @@ GPU memory is managed by Archtype's own allocator, written in C99 (`src/renderer
 
 ### Shaders
 
-Shaders are written in **GLSL** and compiled to **SPIR-V** at build time with **glslc** (included in the Vulkan SDK). The compiled `.spv` files are placed next to the executables and loaded at runtime.
+Shaders are written in **GLSL** and compiled to **SPIR-V** at build time with **glslc** (included in the Vulkan SDK). The examples' compiled `.spv` files are placed next to the executables and loaded at runtime. The engine's own shaders (such as the 2D renderer's) are compiled into the library as C arrays, so games don't need to ship them.
 
 
 ## 📋 License
