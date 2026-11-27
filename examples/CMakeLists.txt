@@ -135,3 +135,12 @@ target_link_libraries(materials3d_c PRIVATE Archtype::archtype)
 # scene, each kind switched on and off with a key
 add_executable(lights3d_c c/lights3d/main.c)
 target_link_libraries(lights3d_c PRIVATE Archtype::archtype)
+
+# 3D models: loads an OBJ file with its MTL materials (models/crate.obj, or
+# any file passed on the command line) and fits the camera to it
+add_executable(models3d_c c/models3d/main.c)
+target_link_libraries(models3d_c PRIVATE Archtype::archtype)
+archtype_add_assets(models3d_c models
+    c/models3d/crate.obj
+    c/models3d/crate.mtl
+)

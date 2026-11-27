@@ -99,7 +99,7 @@ ctest --test-dir build
 
 ### Examples
 
-Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`) and assets (`textures/`).
+Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`) and assets (`textures/`, `models/`).
 
 | Example | What it shows |
 |---|---|
@@ -123,6 +123,7 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `scene3d_c` | A scene drawn with the engine's 3D renderer, with no shaders of its own; Tab adds a crowd of 2500 cubes to watch the draw calls. |
 | `materials3d_c` | Materials: highlights, textures, emission, unlit, double-sided, alpha cutoff and transparency; M turns the floor's mipmaps on and off. |
 | `lights3d_c` | Directional, point and spot lights (Blinn-Phong) on a night scene; keys 1 to 4 switch each kind of light on and off. |
+| `models3d_c` | OBJ models with their MTL materials: shows `models/crate.obj`, or any OBJ file passed on the command line, with the camera fitted to it. |
 
 
 ## Technologies

@@ -14,7 +14,12 @@ add_executable(test_3d test_3d.c)
 target_link_libraries(test_3d PRIVATE Archtype::archtype)
 add_test(NAME 3d COMMAND test_3d)
 
-# Mesh data generators: counts, normals, tangents, texture coordinates, winding
+# Mesh data: the primitive generators (cube, plane, sphere)
 add_executable(test_mesh test_mesh.c)
 target_link_libraries(test_mesh PRIVATE Archtype::archtype)
 add_test(NAME mesh COMMAND test_mesh)
+
+# Models: OBJ/MTL parsing and the generated normals and tangents
+add_executable(test_obj test_obj.c)
+target_link_libraries(test_obj PRIVATE Archtype::archtype)
+add_test(NAME obj COMMAND test_obj)

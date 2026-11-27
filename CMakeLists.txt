@@ -141,6 +141,9 @@ add_library(archtype
     src/renderer/image_loader.c
     src/renderer/mesh.c
     src/renderer/mesh_data.c
+    src/renderer/mesh_utils.c
+    src/renderer/model.c
+    src/renderer/obj_loader.c
     src/renderer/pipeline.c
     src/renderer/renderer.c
     src/renderer/renderer2d.c

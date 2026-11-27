@@ -1,0 +1,11 @@
+# Materials of crate.obj. Colors are linear, as Blender writes them.
+
+newmtl Wood
+Kd 0.30 0.13 0.04
+Ks 0.10 0.10 0.10
+Ns 16
+
+newmtl Metal
+Kd 0.35 0.36 0.40
+Ks 0.90 0.90 0.90
+Ns 128
