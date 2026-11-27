@@ -105,7 +105,7 @@ at_texture_atlas *at_texture_atlas_create(uint32_t width, uint32_t height, uint3
     return atlas;
 }
 
-void at_texture_atlas_destroy(at_texture_atlas *atlas, at_renderer *renderer) {
+void at_texture_atlas_destroy(at_renderer *renderer, at_texture_atlas *atlas) {
     if (!atlas) {
         return;
     }

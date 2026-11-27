@@ -220,7 +220,7 @@ static at_texture_atlas *create_atlas(at_renderer *renderer, atlas_regions *regi
     };
     if (regions->glow < 0 || regions->slime < 0 || regions->heart < 0 || regions->coin < 0 ||
         !at_texture_atlas_build(atlas, renderer, &options)) {
-        at_texture_atlas_destroy(atlas, renderer);
+        at_texture_atlas_destroy(renderer, atlas);
         return NULL;
     }
     return atlas;
@@ -528,7 +528,7 @@ int main(void) {
     }
 
     /* Destroy in reverse order of creation */
-    at_texture_atlas_destroy(s.atlas, renderer);
+    at_texture_atlas_destroy(renderer, s.atlas);
     at_texture_destroy(renderer, sheet_texture);
     at_renderer2d_destroy(r2d);
     at_renderer_destroy(renderer);

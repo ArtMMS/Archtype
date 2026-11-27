@@ -58,7 +58,7 @@ AT_API at_font *at_font_create_from_pixels(at_renderer *renderer, const void *pi
                                            uint32_t first_char, bool monospace);
 
 /* Destroys the font and its texture. Passing NULL is allowed. */
-AT_API void at_font_destroy(at_font *font, at_renderer *renderer);
+AT_API void at_font_destroy(at_renderer *renderer, at_font *font);
 
 /* Distance between two lines, in font texels (the cell height). */
 AT_API float at_font_get_line_height(const at_font *font);

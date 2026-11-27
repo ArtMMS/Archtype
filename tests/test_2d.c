@@ -121,7 +121,8 @@ static void test_texture_atlas(void) {
     at_sprite_desc sprite = at_texture_atlas_sprite(atlas, 1, at_vec2_zero());
     CHECK(same_rect(sprite.source, rb) && sprite.texture == NULL);
 
-    at_texture_atlas_destroy(atlas, NULL);
+    /* Never built: no renderer needed */
+    at_texture_atlas_destroy(NULL, atlas);
 }
 
 int main(void) {

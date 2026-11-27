@@ -441,7 +441,7 @@ int main(void) {
 
     /* Destroy in reverse order of creation */
     at_window_set_mouse_captured(window, false);
-    at_font_destroy(font, renderer);
+    at_font_destroy(renderer, font);
     at_renderer2d_destroy(r2d);
     at_pipeline_destroy(renderer, no_depth_pipeline);
     at_pipeline_destroy(renderer, depth_pipeline);

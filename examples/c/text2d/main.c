@@ -313,7 +313,7 @@ int main(void) {
     }
 
     /* Destroy in reverse order of creation */
-    at_font_destroy(font, renderer);
+    at_font_destroy(renderer, font);
     at_renderer2d_destroy(r2d);
     at_renderer_destroy(renderer);
     at_window_destroy(window);

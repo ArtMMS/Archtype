@@ -308,7 +308,7 @@ at_font *at_font_load(at_renderer *renderer, const char *path,
     return font;
 }
 
-void at_font_destroy(at_font *font, at_renderer *renderer) {
+void at_font_destroy(at_renderer *renderer, at_font *font) {
     if (!font) {
         return;
     }

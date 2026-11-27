@@ -200,7 +200,7 @@ static void destroy_textures(at_renderer *renderer, textures *t) {
     for (uint32_t kind = 0; kind < KIND_COUNT; ++kind) {
         at_texture_destroy(renderer, t->separate[kind]);
     }
-    at_texture_atlas_destroy(t->atlas, renderer);
+    at_texture_atlas_destroy(renderer, t->atlas);
 }
 
 static void draw_sprites(at_renderer2d *r2d, const textures *t, bool use_atlas) {

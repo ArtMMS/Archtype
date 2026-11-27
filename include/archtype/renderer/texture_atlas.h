@@ -42,7 +42,7 @@ AT_API at_texture_atlas *at_texture_atlas_create(uint32_t width, uint32_t height
 
 /* Destroys the atlas and its texture. Passing NULL is allowed. renderer may */
 /* be NULL if the atlas was never built.                                     */
-AT_API void at_texture_atlas_destroy(at_texture_atlas *atlas, at_renderer *renderer);
+AT_API void at_texture_atlas_destroy(at_renderer *renderer, at_texture_atlas *atlas);
 
 /* Copies an image into the atlas: RGBA pixels, 4 bytes each, rows from top */
 /* to bottom. Returns the region index, or -1 if it does not fit or the     */
