@@ -130,3 +130,8 @@ target_link_libraries(scene3d_c PRIVATE Archtype::archtype)
 # alpha cutoff and transparency, and a floor with and without mipmaps
 add_executable(materials3d_c c/materials3d/main.c)
 target_link_libraries(materials3d_c PRIVATE Archtype::archtype)
+
+# 3D lights: directional, point and spot lights (Blinn-Phong) on a night
+# scene, each kind switched on and off with a key
+add_executable(lights3d_c c/lights3d/main.c)
+target_link_libraries(lights3d_c PRIVATE Archtype::archtype)

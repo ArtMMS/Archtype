@@ -2,14 +2,11 @@
 
 // Engine shader for the 3D renderer: compiled into the library at build time.
 
-// Set 0: shared by every mesh of a pass
+// Set 0: shared by every mesh of a pass. The vertex shader only reads the
+// camera at the start of the block; the lights after it are declared in
+// renderer3d.frag.
 layout(set = 0, binding = 0) uniform Frame {
     mat4 view_projection;
-    vec4 camera_position; // xyz
-    vec4 light_direction; // xyz: where the sun light travels
-    vec4 light_color;     // rgb, linear
-    vec4 ambient_sky;     // rgb, linear: light on faces pointing up
-    vec4 ambient_ground;  // rgb, linear: light on faces pointing down
 } frame;
 
 // Per mesh: its matrix and its material's parameters

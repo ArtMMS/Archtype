@@ -122,6 +122,7 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `meshes3d_c` | Primitive meshes (cube, plane, sphere) with debug views of their normals, texture coordinates and tangents (Tab or 1 to 4). |
 | `scene3d_c` | A scene drawn with the engine's 3D renderer, with no shaders of its own; Tab adds a crowd of 2500 cubes to watch the draw calls. |
 | `materials3d_c` | Materials: highlights, textures, emission, unlit, double-sided, alpha cutoff and transparency; M turns the floor's mipmaps on and off. |
+| `lights3d_c` | Directional, point and spot lights (Blinn-Phong) on a night scene; keys 1 to 4 switch each kind of light on and off. |
 
 
 ## Technologies

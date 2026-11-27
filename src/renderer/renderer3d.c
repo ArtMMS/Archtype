@@ -1,6 +1,7 @@
 #include "archtype/renderer/renderer3d.h"
 #include "renderer/renderer_internal.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,16 +23,36 @@ static const uint32_t k_fragment_shader[] =
 #define AT_PIPELINE3D_TRANSPARENT  2u
 #define AT_PIPELINE3D_COUNT        4u
 
+/* Lights as the shaders read them: colors already linear and multiplied */
+/* by the intensity, directions normalized.                              */
+typedef struct at_gpu_directional_light {
+    float direction[4]; /* xyz: where the light travels */
+    float color[4];     /* rgb                          */
+} at_gpu_directional_light;
+
+typedef struct at_gpu_point_light {
+    float position_range[4]; /* xyz: position, w: range */
+    float color[4];          /* rgb                     */
+} at_gpu_point_light;
+
+typedef struct at_gpu_spot_light {
+    float position_range[4];      /* xyz: position, w: range                      */
+    float direction_cos_outer[4]; /* xyz: where it points, w: cos(outer angle)    */
+    float color_cos_inner[4];     /* rgb: color, w: cos(inner angle)              */
+} at_gpu_spot_light;
+
 /* Set 0, binding 0: what every mesh of a pass shares. Must match "uniform */
-/* Frame" in the 3D shaders (std140: only mat4 and vec4). Colors here are  */
-/* linear, ready for the lighting math.                                    */
+/* Frame" in renderer3d.frag (std140: every member is a vec4, a mat4 or an */
+/* array of structs of vec4, so there is no padding to add).               */
 typedef struct at_frame_uniforms3d {
-    at_mat4 view_projection;
-    float   camera_position[4]; /* xyz                               */
-    float   light_direction[4]; /* xyz: where the sun light travels  */
-    float   light_color[4];     /* rgb                               */
-    float   ambient_sky[4];     /* rgb: light on faces pointing up   */
-    float   ambient_ground[4];  /* rgb: light on faces pointing down */
+    at_mat4                  view_projection;
+    float                    camera_position[4]; /* xyz                        */
+    float                    ambient_sky[4];     /* rgb: light on faces up     */
+    float                    ambient_ground[4];  /* rgb: light on faces down   */
+    uint32_t                 light_counts[4];    /* directional, point, spot   */
+    at_gpu_directional_light directional[AT_RENDERER3D_MAX_DIRECTIONAL_LIGHTS];
+    at_gpu_point_light       point[AT_RENDERER3D_MAX_POINT_LIGHTS];
+    at_gpu_spot_light        spot[AT_RENDERER3D_MAX_SPOT_LIGHTS];
 } at_frame_uniforms3d;
 
 /* Per mesh, in push constants: 128 bytes, the most every GPU allows.   */
@@ -56,31 +77,40 @@ typedef struct at_draw_item3d {
 } at_draw_item3d;
 
 struct at_renderer3d {
-    at_renderer        *renderer;
-    at_pipeline        *pipelines[AT_PIPELINE3D_COUNT];
-    at_texture         *white_texture; /* For materials without a texture */
+    at_renderer         *renderer;
+    at_pipeline         *pipelines[AT_PIPELINE3D_COUNT];
+    at_texture          *white_texture; /* For materials without a texture */
 
     /* One uniform buffer per pass of a frame: each pass has its own camera */
-    at_buffer          *frame_buffers[AT_RENDERER3D_MAX_PASSES];
-    uint64_t            frame_number; /* Renderer frame the counts belong to */
-    uint32_t            pass_count;   /* Passes drawn this frame             */
-    at_renderer3d_stats stats;        /* This frame so far                   */
+    /* and lights                                                           */
+    at_buffer           *frame_buffers[AT_RENDERER3D_MAX_PASSES];
+    uint64_t             frame_number; /* Renderer frame the counts belong to */
+    uint32_t             pass_count;   /* Passes drawn this frame             */
+    at_renderer3d_stats  stats;        /* This frame so far                   */
 
     /* Collected since begin */
-    at_draw_item3d     *items;
-    uint32_t            item_count;
-    uint32_t            item_capacity;
-    at_camera3d         camera;
+    at_draw_item3d      *items;
+    uint32_t             item_count;
+    uint32_t             item_capacity;
+    at_camera3d          camera;
 
-    /* Fixed lighting, until the lights of the roadmap */
-    at_vec3             light_direction;
-    float               light_color[3];
-    float               ambient_sky[3];
-    float               ambient_ground[3];
+    at_directional_light directional_lights[AT_RENDERER3D_MAX_DIRECTIONAL_LIGHTS];
+    at_point_light       point_lights[AT_RENDERER3D_MAX_POINT_LIGHTS];
+    at_spot_light        spot_lights[AT_RENDERER3D_MAX_SPOT_LIGHTS];
+    uint32_t             directional_count;
+    uint32_t             point_count;
+    uint32_t             spot_count;
 
-    bool                active;
-    bool                inactive_warned;
-    bool                passes_warned;
+    /* Settings */
+    at_color             ambient_sky;
+    at_color             ambient_ground;
+    float                ambient_intensity;
+    bool                 uses_lights; /* A light was added once: no default sun */
+
+    bool                 active;
+    bool                 inactive_warned;
+    bool                 passes_warned;
+    bool                 lights_warned;
 };
 
 /* ------------------------------------------------------------------------ */
@@ -92,6 +122,32 @@ static void set4(float out[4], float x, float y, float z, float w) {
     out[1] = y;
     out[2] = z;
     out[3] = w;
+}
+
+static float srgb_to_linear(float c) {
+    if (c <= 0.04045f) {
+        return c / 12.92f;
+    }
+    return powf((c + 0.055f) / 1.055f, 2.4f);
+}
+
+/* A color for the shaders: linear, times the intensity; w as given */
+static void light_color(float out[4], at_color color, float intensity, float w) {
+    float k = at_maxf(intensity, 0.0f);
+    set4(out, srgb_to_linear(color.r) * k, srgb_to_linear(color.g) * k,
+         srgb_to_linear(color.b) * k, w);
+}
+
+/* Unit direction; straight down if it has no length */
+static at_vec3 unit_direction(at_vec3 direction) {
+    at_vec3 unit = at_vec3_normalize(direction);
+    return at_vec3_length_sq(unit) > 0.0f ? unit : at_vec3_make(0.0f, -1.0f, 0.0f);
+}
+
+/* The sun of passes without lights, until the first light is added */
+static at_directional_light default_sun(void) {
+    return at_directional_light_make(at_vec3_make(-0.4f, -1.0f, -0.3f),
+                                     at_color_rgb(0.98f, 0.95f, 0.90f), 1.0f);
 }
 
 static bool grow_items(at_renderer3d *renderer3d) {
@@ -158,6 +214,83 @@ static void fill_object(const at_draw_item3d *item, at_object_constants3d *objec
          material->uv_offset.x, material->uv_offset.y);
 }
 
+/* The lights of the pass, as the shaders read them */
+static void fill_lights(const at_renderer3d *renderer3d, at_frame_uniforms3d *frame) {
+    float intensity = at_maxf(renderer3d->ambient_intensity, 0.0f);
+    light_color(frame->ambient_sky, renderer3d->ambient_sky, intensity, 1.0f);
+    light_color(frame->ambient_ground, renderer3d->ambient_ground, intensity, 1.0f);
+
+    /* Directional */
+    at_directional_light sun               = default_sun();
+    const at_directional_light *directional = renderer3d->directional_lights;
+    uint32_t                    count       = renderer3d->directional_count;
+    if (!renderer3d->uses_lights) {
+        directional = &sun;
+        count       = 1;
+    }
+
+    for (uint32_t i = 0; i < count; ++i) {
+        at_vec3 direction = unit_direction(directional[i].direction);
+        set4(frame->directional[i].direction, direction.x, direction.y, direction.z, 0.0f);
+        light_color(frame->directional[i].color, directional[i].color,
+                    directional[i].intensity, 0.0f);
+    }
+    frame->light_counts[0] = count;
+
+    /* Point */
+    for (uint32_t i = 0; i < renderer3d->point_count; ++i) {
+        const at_point_light *light = &renderer3d->point_lights[i];
+        set4(frame->point[i].position_range, light->position.x, light->position.y,
+             light->position.z, at_maxf(light->range, 0.01f));
+        light_color(frame->point[i].color, light->color, light->intensity, 0.0f);
+    }
+    frame->light_counts[1] = renderer3d->point_count;
+
+    /* Spot: the cone edges as cosines; inner stays inside outer, so the */
+    /* fade between them is never zero-width                             */
+    for (uint32_t i = 0; i < renderer3d->spot_count; ++i) {
+        const at_spot_light *light = &renderer3d->spot_lights[i];
+
+        float   outer     = at_clampf(light->outer_angle, 0.01f, AT_PI - 0.01f);
+        float   inner     = at_clampf(light->inner_angle, 0.0f, outer * 0.99f);
+        at_vec3 direction = unit_direction(light->direction);
+
+        set4(frame->spot[i].position_range, light->position.x, light->position.y,
+             light->position.z, at_maxf(light->range, 0.01f));
+        set4(frame->spot[i].direction_cos_outer, direction.x, direction.y, direction.z,
+             cosf(outer));
+        light_color(frame->spot[i].color_cos_inner, light->color, light->intensity, cosf(inner));
+    }
+    frame->light_counts[2] = renderer3d->spot_count;
+    frame->light_counts[3] = 0;
+}
+
+/* Common checks for adding a light; false if it must be skipped */
+static bool accept_light(at_renderer3d *renderer3d, uint32_t count, uint32_t max,
+                         const char *kind) {
+    if (!renderer3d->active) {
+        if (!renderer3d->inactive_warned) {
+            fprintf(stderr, "[archtype] 3D lights and meshes must be added between "
+                            "at_renderer3d_begin and at_renderer3d_end\n");
+            renderer3d->inactive_warned = true;
+        }
+        return false;
+    }
+
+    /* From now on, passes have only the lights they are given */
+    renderer3d->uses_lights = true;
+
+    if (count >= max) {
+        if (!renderer3d->lights_warned) {
+            fprintf(stderr, "[archtype] Too many %s lights in one 3D pass (max %u): "
+                            "the rest are ignored\n", kind, (unsigned)max);
+            renderer3d->lights_warned = true;
+        }
+        return false;
+    }
+    return true;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Creation and destruction                                                  */
 /* ------------------------------------------------------------------------ */
@@ -173,7 +306,7 @@ static at_pipeline *create_pipeline(at_renderer *renderer, at_shader *vertex_sha
     desc.fragment_shader = fragment_shader;
     desc.vertex_layout   = at_mesh_vertex_layout();
 
-    /* Set 0: the pass's camera and lighting (vertex and fragment) */
+    /* Set 0: the pass's camera and lights (vertex and fragment) */
     desc.bindings[0].set     = 0;
     desc.bindings[0].binding = 0;
     desc.bindings[0].type    = AT_BINDING_UNIFORM_BUFFER;
@@ -256,17 +389,10 @@ at_renderer3d *at_renderer3d_create(at_renderer *renderer) {
     renderer3d->renderer = renderer;
     renderer3d->camera   = at_camera3d_make();
 
-    /* A warm sun from above and to the side, a bluish sky, a dark ground */
-    renderer3d->light_direction   = at_vec3_normalize(at_vec3_make(-0.4f, -1.0f, -0.3f));
-    renderer3d->light_color[0]    = 0.95f;
-    renderer3d->light_color[1]    = 0.90f;
-    renderer3d->light_color[2]    = 0.80f;
-    renderer3d->ambient_sky[0]    = 0.16f;
-    renderer3d->ambient_sky[1]    = 0.19f;
-    renderer3d->ambient_sky[2]    = 0.25f;
-    renderer3d->ambient_ground[0] = 0.05f;
-    renderer3d->ambient_ground[1] = 0.045f;
-    renderer3d->ambient_ground[2] = 0.04f;
+    /* A soft bluish sky over a dark ground */
+    renderer3d->ambient_sky       = at_color_rgb(0.44f, 0.47f, 0.54f);
+    renderer3d->ambient_ground    = at_color_rgb(0.25f, 0.235f, 0.22f);
+    renderer3d->ambient_intensity = 1.0f;
 
     if (!create_pipelines(renderer3d) || !create_white_texture(renderer3d) ||
         !create_frame_buffers(renderer3d) || !grow_items(renderer3d)) {
@@ -324,9 +450,12 @@ void at_renderer3d_begin(at_renderer3d *renderer3d, const at_camera3d *camera) {
         memset(&renderer3d->stats, 0, sizeof(renderer3d->stats));
     }
 
-    renderer3d->camera     = camera ? *camera : at_camera3d_make();
-    renderer3d->item_count = 0;
-    renderer3d->active     = true;
+    renderer3d->camera            = camera ? *camera : at_camera3d_make();
+    renderer3d->item_count        = 0;
+    renderer3d->directional_count = 0;
+    renderer3d->point_count       = 0;
+    renderer3d->spot_count        = 0;
+    renderer3d->active            = true;
 }
 
 void at_renderer3d_end(at_renderer3d *renderer3d) {
@@ -357,21 +486,18 @@ void at_renderer3d_end(at_renderer3d *renderer3d) {
     at_buffer   *frame_buffer = renderer3d->frame_buffers[renderer3d->pass_count++];
     VkExtent2D   extent       = renderer->swapchain.extent;
 
-    /* 1. What every mesh of this pass shares */
+    /* 1. What every mesh of this pass shares: the camera and the lights */
     at_frame_uniforms3d frame;
+    memset(&frame, 0, sizeof(frame));
     frame.view_projection = at_camera3d_view_projection(&renderer3d->camera,
                                                         (float)extent.width,
                                                         (float)extent.height);
     set4(frame.camera_position, renderer3d->camera.position.x, renderer3d->camera.position.y,
          renderer3d->camera.position.z, 1.0f);
-    set4(frame.light_direction, renderer3d->light_direction.x, renderer3d->light_direction.y,
-         renderer3d->light_direction.z, 0.0f);
-    set4(frame.light_color, renderer3d->light_color[0], renderer3d->light_color[1],
-         renderer3d->light_color[2], 1.0f);
-    set4(frame.ambient_sky, renderer3d->ambient_sky[0], renderer3d->ambient_sky[1],
-         renderer3d->ambient_sky[2], 1.0f);
-    set4(frame.ambient_ground, renderer3d->ambient_ground[0], renderer3d->ambient_ground[1],
-         renderer3d->ambient_ground[2], 1.0f);
+    fill_lights(renderer3d, &frame);
+
+    renderer3d->stats.lights += frame.light_counts[0] + frame.light_counts[1]
+                              + frame.light_counts[2];
 
     at_buffer_update(renderer, frame_buffer, &frame, sizeof(frame), 0);
 
@@ -420,7 +546,7 @@ at_renderer3d_stats at_renderer3d_get_stats(const at_renderer3d *renderer3d) {
 }
 
 /* ------------------------------------------------------------------------ */
-/* Drawing                                                                   */
+/* Meshes                                                                    */
 /* ------------------------------------------------------------------------ */
 
 void at_renderer3d_draw_mesh_ex(at_renderer3d *renderer3d, const at_mesh *mesh, at_mat4 model,
@@ -430,8 +556,8 @@ void at_renderer3d_draw_mesh_ex(at_renderer3d *renderer3d, const at_mesh *mesh, 
     }
     if (!renderer3d->active) {
         if (!renderer3d->inactive_warned) {
-            fprintf(stderr, "[archtype] 3D meshes must be drawn between at_renderer3d_begin "
-                            "and at_renderer3d_end\n");
+            fprintf(stderr, "[archtype] 3D lights and meshes must be added between "
+                            "at_renderer3d_begin and at_renderer3d_end\n");
             renderer3d->inactive_warned = true;
         }
         return;
@@ -468,4 +594,46 @@ void at_renderer3d_draw_mesh(at_renderer3d *renderer3d, const at_mesh *mesh, at_
     at_material material = at_material_make();
     material.base_color  = color;
     at_renderer3d_draw_mesh_ex(renderer3d, mesh, model, &material);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Lights                                                                    */
+/* ------------------------------------------------------------------------ */
+
+void at_renderer3d_add_directional_light(at_renderer3d *renderer3d,
+                                         const at_directional_light *light) {
+    if (!renderer3d || !light ||
+        !accept_light(renderer3d, renderer3d->directional_count,
+                      AT_RENDERER3D_MAX_DIRECTIONAL_LIGHTS, "directional")) {
+        return;
+    }
+    renderer3d->directional_lights[renderer3d->directional_count++] = *light;
+}
+
+void at_renderer3d_add_point_light(at_renderer3d *renderer3d, const at_point_light *light) {
+    if (!renderer3d || !light ||
+        !accept_light(renderer3d, renderer3d->point_count, AT_RENDERER3D_MAX_POINT_LIGHTS,
+                      "point")) {
+        return;
+    }
+    renderer3d->point_lights[renderer3d->point_count++] = *light;
+}
+
+void at_renderer3d_add_spot_light(at_renderer3d *renderer3d, const at_spot_light *light) {
+    if (!renderer3d || !light ||
+        !accept_light(renderer3d, renderer3d->spot_count, AT_RENDERER3D_MAX_SPOT_LIGHTS,
+                      "spot")) {
+        return;
+    }
+    renderer3d->spot_lights[renderer3d->spot_count++] = *light;
+}
+
+void at_renderer3d_set_ambient(at_renderer3d *renderer3d, at_color sky, at_color ground,
+                               float intensity) {
+    if (!renderer3d) {
+        return;
+    }
+    renderer3d->ambient_sky       = sky;
+    renderer3d->ambient_ground    = ground;
+    renderer3d->ambient_intensity = intensity;
 }
