@@ -111,3 +111,12 @@ archtype_add_shaders(camera3d_c
     c/camera3d/camera3d.vert
     c/camera3d/camera3d.frag
 )
+
+# 3D meshes: the engine's primitive meshes (cube, plane, sphere), with debug
+# views of their normals, texture coordinates and tangents
+add_executable(meshes3d_c c/meshes3d/main.c)
+target_link_libraries(meshes3d_c PRIVATE Archtype::archtype)
+archtype_add_shaders(meshes3d_c
+    c/meshes3d/meshes3d.vert
+    c/meshes3d/meshes3d.frag
+)

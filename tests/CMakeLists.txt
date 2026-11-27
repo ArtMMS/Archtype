@@ -13,3 +13,8 @@ add_test(NAME 2d COMMAND test_2d)
 add_executable(test_3d test_3d.c)
 target_link_libraries(test_3d PRIVATE Archtype::archtype)
 add_test(NAME 3d COMMAND test_3d)
+
+# Mesh data generators: counts, normals, tangents, texture coordinates, winding
+add_executable(test_mesh test_mesh.c)
+target_link_libraries(test_mesh PRIVATE Archtype::archtype)
+add_test(NAME mesh COMMAND test_mesh)

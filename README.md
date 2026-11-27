@@ -119,6 +119,7 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `stress2d_c` | Batching stress test with up to 100k sprites: draw calls with an atlas versus one texture per image. |
 | `text2d_c` | Text with the built-in bitmap font: scales, colors, alignment, measuring and a stats HUD. |
 | `camera3d_c` | 3D perspective camera with a free fly camera (right mouse button to look, WASD to move) and the depth buffer, with a 2D HUD on top. |
+| `meshes3d_c` | Primitive meshes (cube, plane, sphere) with debug views of their normals, texture coordinates and tangents (Tab or 1 to 4). |
 
 
 ## Technologies
