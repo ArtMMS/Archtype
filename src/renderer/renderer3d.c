@@ -17,36 +17,48 @@ static const uint32_t k_fragment_shader[] =
 
 #define AT_RENDERER3D_INITIAL_ITEMS 256
 
+/* One pipeline per combination of these bits */
+#define AT_PIPELINE3D_DOUBLE_SIDED 1u
+#define AT_PIPELINE3D_TRANSPARENT  2u
+#define AT_PIPELINE3D_COUNT        4u
+
 /* Set 0, binding 0: what every mesh of a pass shares. Must match "uniform */
 /* Frame" in the 3D shaders (std140: only mat4 and vec4). Colors here are  */
 /* linear, ready for the lighting math.                                    */
 typedef struct at_frame_uniforms3d {
     at_mat4 view_projection;
-    float   camera_position[4]; /* xyz                              */
-    float   light_direction[4]; /* xyz: where the sun light travels */
-    float   light_color[4];     /* rgb                              */
-    float   ambient_sky[4];     /* rgb: light on faces pointing up  */
+    float   camera_position[4]; /* xyz                               */
+    float   light_direction[4]; /* xyz: where the sun light travels  */
+    float   light_color[4];     /* rgb                               */
+    float   ambient_sky[4];     /* rgb: light on faces pointing up   */
     float   ambient_ground[4];  /* rgb: light on faces pointing down */
 } at_frame_uniforms3d;
 
-/* Per mesh, in push constants: 128 bytes, the most every GPU allows.  */
-/* Must match "push_constant Object" in the 3D shaders.                */
+/* Per mesh, in push constants: 128 bytes, the most every GPU allows.   */
+/* Must match "push_constant Object" in the 3D shaders. The material's  */
+/* texture goes in set 1.                                               */
 typedef struct at_object_constants3d {
     at_mat4 model;
-    float   normal_matrix[3][4]; /* Columns of the normal matrix, as vec4 */
-    float   color[4];            /* sRGB                                 */
+    float   base_color[4];   /* sRGB rgb, alpha                              */
+    float   emissive[4];     /* sRGB rgb, w = strength                       */
+    float   params[4];       /* specular, shininess, alpha cutoff, unlit     */
+    float   uv_transform[4]; /* xy = scale, zw = offset                      */
 } at_object_constants3d;
 
 /* One mesh waiting for end */
 typedef struct at_draw_item3d {
     const at_mesh *mesh;
     at_mat4        model;
-    at_color       color;
+    at_material    material;
+    uint32_t       pipeline; /* AT_PIPELINE3D_* bits                     */
+    uint32_t       sequence; /* Order it was drawn in: keeps ties in order */
+    float          distance; /* From the camera, squared                  */
 } at_draw_item3d;
 
 struct at_renderer3d {
     at_renderer        *renderer;
-    at_pipeline        *pipeline;
+    at_pipeline        *pipelines[AT_PIPELINE3D_COUNT];
+    at_texture         *white_texture; /* For materials without a texture */
 
     /* One uniform buffer per pass of a frame: each pass has its own camera */
     at_buffer          *frame_buffers[AT_RENDERER3D_MAX_PASSES];
@@ -75,21 +87,7 @@ struct at_renderer3d {
 /* Helpers                                                                   */
 /* ------------------------------------------------------------------------ */
 
-/* The matrix that turns normals with the object: the inverse transpose */
-/* of the model's rotation and scale. With a different scale on each    */
-/* axis, the model matrix itself would tilt normals off the surface.    */
-static void make_normal_matrix(at_mat4 model, float out[3][4]) {
-    at_mat4 inverse_transpose = at_mat4_transpose(at_mat4_inverse(model));
-
-    for (int column = 0; column < 3; ++column) {
-        for (int row = 0; row < 3; ++row) {
-            out[column][row] = inverse_transpose.m[column][row];
-        }
-        out[column][3] = 0.0f;
-    }
-}
-
-static void copy3(float out[4], float x, float y, float z, float w) {
+static void set4(float out[4], float x, float y, float z, float w) {
     out[0] = x;
     out[1] = y;
     out[2] = z;
@@ -115,7 +113,88 @@ static bool grow_items(at_renderer3d *renderer3d) {
     return true;
 }
 
-static bool create_pipeline(at_renderer3d *renderer3d) {
+/* Opaque first, sorted to change pipelines and textures as little as   */
+/* possible; then transparent, from the farthest to the nearest. Ties   */
+/* keep the order they were drawn in.                                   */
+static int compare_items(const void *a, const void *b) {
+    const at_draw_item3d *x = (const at_draw_item3d *)a;
+    const at_draw_item3d *y = (const at_draw_item3d *)b;
+
+    bool x_transparent = (x->pipeline & AT_PIPELINE3D_TRANSPARENT) != 0;
+    bool y_transparent = (y->pipeline & AT_PIPELINE3D_TRANSPARENT) != 0;
+    if (x_transparent != y_transparent) {
+        return x_transparent ? 1 : -1;
+    }
+
+    if (x_transparent) {
+        if (x->distance != y->distance) {
+            return x->distance > y->distance ? -1 : 1;
+        }
+    } else {
+        if (x->pipeline != y->pipeline) {
+            return x->pipeline < y->pipeline ? -1 : 1;
+        }
+        uintptr_t x_texture = (uintptr_t)x->material.base_texture;
+        uintptr_t y_texture = (uintptr_t)y->material.base_texture;
+        if (x_texture != y_texture) {
+            return x_texture < y_texture ? -1 : 1;
+        }
+    }
+
+    return x->sequence < y->sequence ? -1 : (x->sequence > y->sequence ? 1 : 0);
+}
+
+static void fill_object(const at_draw_item3d *item, at_object_constants3d *object) {
+    const at_material *material = &item->material;
+
+    object->model = item->model;
+    set4(object->base_color, material->base_color.r, material->base_color.g,
+         material->base_color.b, material->base_color.a);
+    set4(object->emissive, material->emissive.r, material->emissive.g, material->emissive.b,
+         at_maxf(material->emissive_strength, 0.0f));
+    set4(object->params, at_maxf(material->specular, 0.0f), at_maxf(material->shininess, 1.0f),
+         material->alpha_cutoff, material->unlit ? 1.0f : 0.0f);
+    set4(object->uv_transform, material->uv_scale.x, material->uv_scale.y,
+         material->uv_offset.x, material->uv_offset.y);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Creation and destruction                                                  */
+/* ------------------------------------------------------------------------ */
+
+static at_pipeline *create_pipeline(at_renderer *renderer, at_shader *vertex_shader,
+                                    at_shader *fragment_shader, uint32_t variant) {
+    bool double_sided = (variant & AT_PIPELINE3D_DOUBLE_SIDED) != 0;
+    bool transparent  = (variant & AT_PIPELINE3D_TRANSPARENT) != 0;
+
+    at_pipeline_desc desc;
+    memset(&desc, 0, sizeof(desc));
+    desc.vertex_shader   = vertex_shader;
+    desc.fragment_shader = fragment_shader;
+    desc.vertex_layout   = at_mesh_vertex_layout();
+
+    /* Set 0: the pass's camera and lighting (vertex and fragment) */
+    desc.bindings[0].set     = 0;
+    desc.bindings[0].binding = 0;
+    desc.bindings[0].type    = AT_BINDING_UNIFORM_BUFFER;
+
+    /* Set 1: the material's texture */
+    desc.bindings[1].set     = 1;
+    desc.bindings[1].binding = 0;
+    desc.bindings[1].type    = AT_BINDING_TEXTURE;
+    desc.bindings[1].stages  = AT_SHADER_STAGE_FRAGMENT;
+    desc.binding_count       = 2;
+
+    desc.push_constant_size = sizeof(at_object_constants3d);
+    desc.cull_mode          = double_sided ? AT_CULL_NONE : AT_CULL_BACK;
+    desc.blend_mode         = transparent ? AT_BLEND_ALPHA : AT_BLEND_NONE;
+    desc.depth_test         = true;
+    desc.depth_write        = !transparent; /* Transparent: don't hide what comes later */
+
+    return at_pipeline_create(renderer, &desc);
+}
+
+static bool create_pipelines(at_renderer3d *renderer3d) {
     at_renderer *renderer = renderer3d->renderer;
 
     at_shader *vertex_shader   = at_shader_create(renderer, k_vertex_shader,
@@ -123,31 +202,28 @@ static bool create_pipeline(at_renderer3d *renderer3d) {
     at_shader *fragment_shader = at_shader_create(renderer, k_fragment_shader,
                                                   sizeof(k_fragment_shader));
 
-    if (vertex_shader && fragment_shader) {
-        at_pipeline_desc desc;
-        memset(&desc, 0, sizeof(desc));
-        desc.vertex_shader   = vertex_shader;
-        desc.fragment_shader = fragment_shader;
-        desc.vertex_layout   = at_mesh_vertex_layout();
-
-        /* Set 0: the frame's camera and lighting, vertex and fragment */
-        desc.binding_count       = 1;
-        desc.bindings[0].set     = 0;
-        desc.bindings[0].binding = 0;
-        desc.bindings[0].type    = AT_BINDING_UNIFORM_BUFFER;
-
-        desc.push_constant_size = sizeof(at_object_constants3d);
-        desc.cull_mode          = AT_CULL_BACK;
-        desc.depth_test         = true;
-        desc.depth_write        = true;
-
-        renderer3d->pipeline = at_pipeline_create(renderer, &desc);
+    bool ok = vertex_shader && fragment_shader;
+    for (uint32_t variant = 0; ok && variant < AT_PIPELINE3D_COUNT; ++variant) {
+        renderer3d->pipelines[variant] = create_pipeline(renderer, vertex_shader,
+                                                         fragment_shader, variant);
+        ok = renderer3d->pipelines[variant] != NULL;
     }
 
-    /* The pipeline keeps what it needs */
+    /* The pipelines keep what they need */
     at_shader_destroy(renderer, vertex_shader);
     at_shader_destroy(renderer, fragment_shader);
-    return renderer3d->pipeline != NULL;
+    return ok;
+}
+
+static bool create_white_texture(at_renderer3d *renderer3d) {
+    static const uint8_t white[4] = { 255, 255, 255, 255 };
+
+    at_texture_options options;
+    memset(&options, 0, sizeof(options));
+    options.filter = AT_TEXTURE_FILTER_NEAREST;
+
+    renderer3d->white_texture = at_texture_create(renderer3d->renderer, 1, 1, white, &options);
+    return renderer3d->white_texture != NULL;
 }
 
 static bool create_frame_buffers(at_renderer3d *renderer3d) {
@@ -164,10 +240,6 @@ static bool create_frame_buffers(at_renderer3d *renderer3d) {
     }
     return true;
 }
-
-/* ------------------------------------------------------------------------ */
-/* Creation and destruction                                                  */
-/* ------------------------------------------------------------------------ */
 
 at_renderer3d *at_renderer3d_create(at_renderer *renderer) {
     if (!renderer) {
@@ -196,8 +268,8 @@ at_renderer3d *at_renderer3d_create(at_renderer *renderer) {
     renderer3d->ambient_ground[1] = 0.045f;
     renderer3d->ambient_ground[2] = 0.04f;
 
-    if (!create_pipeline(renderer3d) || !create_frame_buffers(renderer3d) ||
-        !grow_items(renderer3d)) {
+    if (!create_pipelines(renderer3d) || !create_white_texture(renderer3d) ||
+        !create_frame_buffers(renderer3d) || !grow_items(renderer3d)) {
         at_renderer3d_destroy(renderer3d);
         return NULL;
     }
@@ -216,7 +288,10 @@ void at_renderer3d_destroy(at_renderer3d *renderer3d) {
     for (uint32_t i = 0; i < AT_RENDERER3D_MAX_PASSES; ++i) {
         at_buffer_destroy(renderer, renderer3d->frame_buffers[i]);
     }
-    at_pipeline_destroy(renderer, renderer3d->pipeline);
+    at_texture_destroy(renderer, renderer3d->white_texture);
+    for (uint32_t variant = 0; variant < AT_PIPELINE3D_COUNT; ++variant) {
+        at_pipeline_destroy(renderer, renderer3d->pipelines[variant]);
+    }
     free(renderer3d->items);
     free(renderer3d);
 }
@@ -287,36 +362,49 @@ void at_renderer3d_end(at_renderer3d *renderer3d) {
     frame.view_projection = at_camera3d_view_projection(&renderer3d->camera,
                                                         (float)extent.width,
                                                         (float)extent.height);
-    copy3(frame.camera_position, renderer3d->camera.position.x,
-          renderer3d->camera.position.y, renderer3d->camera.position.z, 1.0f);
-    copy3(frame.light_direction, renderer3d->light_direction.x,
-          renderer3d->light_direction.y, renderer3d->light_direction.z, 0.0f);
-    copy3(frame.light_color, renderer3d->light_color[0], renderer3d->light_color[1],
-          renderer3d->light_color[2], 1.0f);
-    copy3(frame.ambient_sky, renderer3d->ambient_sky[0], renderer3d->ambient_sky[1],
-          renderer3d->ambient_sky[2], 1.0f);
-    copy3(frame.ambient_ground, renderer3d->ambient_ground[0], renderer3d->ambient_ground[1],
-          renderer3d->ambient_ground[2], 1.0f);
+    set4(frame.camera_position, renderer3d->camera.position.x, renderer3d->camera.position.y,
+         renderer3d->camera.position.z, 1.0f);
+    set4(frame.light_direction, renderer3d->light_direction.x, renderer3d->light_direction.y,
+         renderer3d->light_direction.z, 0.0f);
+    set4(frame.light_color, renderer3d->light_color[0], renderer3d->light_color[1],
+         renderer3d->light_color[2], 1.0f);
+    set4(frame.ambient_sky, renderer3d->ambient_sky[0], renderer3d->ambient_sky[1],
+         renderer3d->ambient_sky[2], 1.0f);
+    set4(frame.ambient_ground, renderer3d->ambient_ground[0], renderer3d->ambient_ground[1],
+         renderer3d->ambient_ground[2], 1.0f);
 
     at_buffer_update(renderer, frame_buffer, &frame, sizeof(frame), 0);
 
-    at_renderer_bind_pipeline(renderer, renderer3d->pipeline);
+    /* 2. Opaque first, transparent last and back to front */
+    qsort(renderer3d->items, renderer3d->item_count, sizeof(at_draw_item3d), compare_items);
+
+    /* 3. Draw. Set 0 stays the same for the whole pass; set 1 is only */
+    /*    rebuilt when the texture changes from one mesh to the next.  */
     at_renderer_bind_uniform_buffer_in_set(renderer, 0, 0, frame_buffer);
 
-    /* 2. Each mesh: its matrices and color in push constants, then a draw */
+    uint32_t bound_pipeline = AT_PIPELINE3D_COUNT; /* None yet */
     for (uint32_t i = 0; i < renderer3d->item_count; ++i) {
         const at_draw_item3d *item = &renderer3d->items[i];
 
-        at_object_constants3d object;
-        object.model = item->model;
-        make_normal_matrix(item->model, object.normal_matrix);
-        copy3(object.color, item->color.r, item->color.g, item->color.b, item->color.a);
+        if (item->pipeline != bound_pipeline) {
+            at_renderer_bind_pipeline(renderer, renderer3d->pipelines[item->pipeline]);
+            bound_pipeline = item->pipeline;
+        }
 
+        at_texture *texture = item->material.base_texture ? item->material.base_texture
+                                                          : renderer3d->white_texture;
+        at_renderer_bind_texture_in_set(renderer, 1, 0, texture);
+
+        at_object_constants3d object;
+        fill_object(item, &object);
         at_renderer_push_constants(renderer, &object, sizeof(object));
         at_mesh_draw(renderer, item->mesh);
 
         renderer3d->stats.draw_calls++;
         renderer3d->stats.triangles += at_mesh_get_index_count(item->mesh) / 3;
+        if (item->pipeline & AT_PIPELINE3D_TRANSPARENT) {
+            renderer3d->stats.transparent++;
+        }
     }
 
     renderer3d->item_count = 0;
@@ -335,8 +423,8 @@ at_renderer3d_stats at_renderer3d_get_stats(const at_renderer3d *renderer3d) {
 /* Drawing                                                                   */
 /* ------------------------------------------------------------------------ */
 
-void at_renderer3d_draw_mesh(at_renderer3d *renderer3d, const at_mesh *mesh, at_mat4 model,
-                             at_color color) {
+void at_renderer3d_draw_mesh_ex(at_renderer3d *renderer3d, const at_mesh *mesh, at_mat4 model,
+                                const at_material *material) {
     if (!renderer3d || !mesh) {
         return;
     }
@@ -352,8 +440,32 @@ void at_renderer3d_draw_mesh(at_renderer3d *renderer3d, const at_mesh *mesh, at_
         return;
     }
 
-    at_draw_item3d *item = &renderer3d->items[renderer3d->item_count++];
-    item->mesh  = mesh;
-    item->model = model;
-    item->color = color;
+    at_draw_item3d *item = &renderer3d->items[renderer3d->item_count];
+    item->mesh     = mesh;
+    item->model    = model;
+    item->material = material ? *material : at_material_make();
+    item->sequence = renderer3d->item_count;
+
+    item->pipeline = 0;
+    if (item->material.double_sided) {
+        item->pipeline |= AT_PIPELINE3D_DOUBLE_SIDED;
+    }
+    if (item->material.transparent) {
+        item->pipeline |= AT_PIPELINE3D_TRANSPARENT;
+    }
+
+    /* The object's origin (the translation of its model matrix) */
+    float dx = model.m[3][0] - renderer3d->camera.position.x;
+    float dy = model.m[3][1] - renderer3d->camera.position.y;
+    float dz = model.m[3][2] - renderer3d->camera.position.z;
+    item->distance = dx * dx + dy * dy + dz * dz;
+
+    renderer3d->item_count++;
+}
+
+void at_renderer3d_draw_mesh(at_renderer3d *renderer3d, const at_mesh *mesh, at_mat4 model,
+                             at_color color) {
+    at_material material = at_material_make();
+    material.base_color  = color;
+    at_renderer3d_draw_mesh_ex(renderer3d, mesh, model, &material);
 }

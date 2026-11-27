@@ -26,6 +26,21 @@ static VkFormat to_vk_format(at_texture_color_space color_space) {
                                                         : VK_FORMAT_R8G8B8A8_SRGB;
 }
 
+/* How many mip levels the texture gets: the whole chain when asked for */
+/* and the GPU can build it, otherwise just the image itself.           */
+static uint32_t choose_mip_levels(at_renderer *renderer, uint32_t width, uint32_t height,
+                                  VkFormat format, const at_texture_options *options) {
+    if (!options->mipmaps) {
+        return 1;
+    }
+    if (!at_vk_format_supports_mipmaps(&renderer->context, format)) {
+        fprintf(stderr, "[archtype] This GPU can't generate mipmaps for the texture's "
+                        "format: it gets no mipmaps\n");
+        return 1;
+    }
+    return at_vk_mip_level_count(width, height);
+}
+
 static bool create_sampler(at_renderer *renderer, at_texture *texture,
                            const at_texture_options *options) {
     VkFilter             filter  = to_vk_filter(options->filter);
@@ -36,13 +51,18 @@ static bool create_sampler(at_renderer *renderer, at_texture *texture,
     info.sType        = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     info.magFilter    = filter;
     info.minFilter    = filter;
-    info.mipmapMode   = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     info.addressModeU = address;
     info.addressModeV = address;
     info.addressModeW = address;
-    info.minLod       = 0.0f;
-    info.maxLod       = 0.0f; /* No mipmaps yet */
     info.borderColor  = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+
+    /* Between mip levels: blend the two nearest (smooth), or take the */
+    /* nearest one (sharp pixels).                                     */
+    info.mipmapMode = options->filter == AT_TEXTURE_FILTER_NEAREST
+                    ? VK_SAMPLER_MIPMAP_MODE_NEAREST
+                    : VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    info.minLod     = 0.0f;
+    info.maxLod     = (float)texture->image.mip_levels;
 
     VkResult result = vkCreateSampler(renderer->context.device, &info, NULL, &texture->sampler);
     if (result != VK_SUCCESS) {
@@ -78,9 +98,18 @@ at_texture *at_texture_create(at_renderer *renderer, uint32_t width, uint32_t he
         return NULL;
     }
 
-    bool ok = at_vk_image_create(&texture->image, &renderer->allocator, &renderer->context,
-                                 width, height, to_vk_format(options->color_space),
-                                 VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+    VkFormat format     = to_vk_format(options->color_space);
+    uint32_t mip_levels = choose_mip_levels(renderer, width, height, format, options);
+
+    /* Mipmaps are made by copying each level into the next, so the image */
+    /* is also read by transfers                                          */
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    if (mip_levels > 1) {
+        usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    }
+
+    bool ok = at_vk_image_create_ex(&texture->image, &renderer->allocator, &renderer->context,
+                                    width, height, format, usage, mip_levels)
            && at_vk_image_upload(&texture->image, &renderer->allocator, &renderer->upload,
                                  &renderer->context, pixels)
            && create_sampler(renderer, texture, options);
@@ -107,8 +136,8 @@ at_texture *at_texture_load(at_renderer *renderer, const char *path,
     at_texture *texture = at_texture_create(renderer, image.width, image.height,
                                             image.pixels, options);
     if (texture) {
-        fprintf(stderr, "[archtype] Texture loaded: %s (%ux%u)\n",
-                path, image.width, image.height);
+        fprintf(stderr, "[archtype] Texture loaded: %s (%ux%u, %u mip levels)\n",
+                path, image.width, image.height, texture->image.mip_levels);
     }
 
     at_image_free(&image);

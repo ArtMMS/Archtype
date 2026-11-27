@@ -70,18 +70,42 @@ VkFormat at_vk_choose_depth_format(const at_vk_context *context) {
     return VK_FORMAT_UNDEFINED;
 }
 
+uint32_t at_vk_mip_level_count(uint32_t width, uint32_t height) {
+    uint32_t size   = width > height ? width : height;
+    uint32_t levels = 1;
+    while (size > 1) {
+        size >>= 1;
+        ++levels;
+    }
+    return levels;
+}
+
+bool at_vk_format_supports_mipmaps(const at_vk_context *context, VkFormat format) {
+    VkFormatProperties properties;
+    vkGetPhysicalDeviceFormatProperties(context->physical_device, format, &properties);
+
+    const VkFormatFeatureFlags needed = VK_FORMAT_FEATURE_BLIT_SRC_BIT
+                                      | VK_FORMAT_FEATURE_BLIT_DST_BIT
+                                      | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    return (properties.optimalTilingFeatures & needed) == needed;
+}
+
 /* ------------------------------------------------------------------------ */
 /* Images                                                                    */
 /* ------------------------------------------------------------------------ */
 
-static void transition_image(VkCommandBuffer       command_buffer,
-                             VkImage               image,
-                             VkImageLayout         old_layout,
-                             VkImageLayout         new_layout,
-                             VkPipelineStageFlags2 src_stage,
-                             VkAccessFlags2        src_access,
-                             VkPipelineStageFlags2 dst_stage,
-                             VkAccessFlags2        dst_access) {
+/* Changes the layout of level_count mip levels of a color image, from */
+/* base_level, and orders the work before and after it.               */
+static void transition_levels(VkCommandBuffer       command_buffer,
+                              VkImage               image,
+                              uint32_t              base_level,
+                              uint32_t              level_count,
+                              VkImageLayout         old_layout,
+                              VkImageLayout         new_layout,
+                              VkPipelineStageFlags2 src_stage,
+                              VkAccessFlags2        src_access,
+                              VkPipelineStageFlags2 dst_stage,
+                              VkAccessFlags2        dst_access) {
     VkImageMemoryBarrier2 barrier;
     memset(&barrier, 0, sizeof(barrier));
     barrier.sType                           = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
@@ -95,8 +119,8 @@ static void transition_image(VkCommandBuffer       command_buffer,
     barrier.dstQueueFamilyIndex             = VK_QUEUE_FAMILY_IGNORED;
     barrier.image                           = image;
     barrier.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel   = 0;
-    barrier.subresourceRange.levelCount     = 1;
+    barrier.subresourceRange.baseMipLevel   = base_level;
+    barrier.subresourceRange.levelCount     = level_count;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount     = 1;
 
@@ -116,7 +140,21 @@ bool at_vk_image_create(at_vk_image         *image,
                         uint32_t             height,
                         VkFormat             format,
                         VkImageUsageFlags    usage) {
+    return at_vk_image_create_ex(image, allocator, context, width, height, format, usage, 1);
+}
+
+bool at_vk_image_create_ex(at_vk_image         *image,
+                           at_vk_allocator     *allocator,
+                           const at_vk_context *context,
+                           uint32_t             width,
+                           uint32_t             height,
+                           VkFormat             format,
+                           VkImageUsageFlags    usage,
+                           uint32_t             mip_levels) {
     memset(image, 0, sizeof(*image));
+    if (mip_levels == 0) {
+        mip_levels = 1;
+    }
 
     VkImageCreateInfo image_info;
     memset(&image_info, 0, sizeof(image_info));
@@ -126,7 +164,7 @@ bool at_vk_image_create(at_vk_image         *image,
     image_info.extent.width  = width;
     image_info.extent.height = height;
     image_info.extent.depth  = 1;
-    image_info.mipLevels     = 1;
+    image_info.mipLevels     = mip_levels;
     image_info.arrayLayers   = 1;
     image_info.samples       = VK_SAMPLE_COUNT_1_BIT;
     image_info.tiling        = VK_IMAGE_TILING_OPTIMAL; /* GPU-friendly layout */
@@ -151,6 +189,7 @@ bool at_vk_image_create(at_vk_image         *image,
     image->format        = format;
     image->extent.width  = width;
     image->extent.height = height;
+    image->mip_levels    = mip_levels;
 
     VkImageViewCreateInfo view_info;
     memset(&view_info, 0, sizeof(view_info));
@@ -164,7 +203,7 @@ bool at_vk_image_create(at_vk_image         *image,
     view_info.components.a                    = VK_COMPONENT_SWIZZLE_IDENTITY;
     view_info.subresourceRange.aspectMask     = at_vk_format_aspect(format);
     view_info.subresourceRange.baseMipLevel   = 0;
-    view_info.subresourceRange.levelCount     = 1;
+    view_info.subresourceRange.levelCount     = mip_levels;
     view_info.subresourceRange.baseArrayLayer = 0;
     view_info.subresourceRange.layerCount     = 1;
 
@@ -191,6 +230,68 @@ void at_vk_image_destroy(at_vk_image         *image,
     memset(image, 0, sizeof(*image));
 }
 
+/* Level 0 holds the pixels and every level is in TRANSFER_DST. Each level */
+/* is made by shrinking the one before it to half its size; once a level  */
+/* has been read for the next one, it is made readable by shaders.        */
+static void generate_mipmaps(VkCommandBuffer command_buffer, const at_vk_image *image) {
+    const VkPipelineStageFlags2 shader_stages = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT
+                                              | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+
+    int32_t width  = (int32_t)image->extent.width;
+    int32_t height = (int32_t)image->extent.height;
+
+    for (uint32_t level = 1; level < image->mip_levels; ++level) {
+        int32_t next_width  = width > 1 ? width / 2 : 1;
+        int32_t next_height = height > 1 ? height / 2 : 1;
+
+        /* The level before is complete: read it */
+        transition_levels(command_buffer, image->handle, level - 1, 1,
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+        VkImageBlit blit;
+        memset(&blit, 0, sizeof(blit));
+        blit.srcSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.mipLevel       = level - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount     = 1;
+        blit.srcOffsets[1].x               = width;
+        blit.srcOffsets[1].y               = height;
+        blit.srcOffsets[1].z               = 1;
+        blit.dstSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.mipLevel       = level;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount     = 1;
+        blit.dstOffsets[1].x               = next_width;
+        blit.dstOffsets[1].y               = next_height;
+        blit.dstOffsets[1].z               = 1;
+
+        vkCmdBlitImage(command_buffer,
+                       image->handle, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       image->handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                       1, &blit, VK_FILTER_LINEAR);
+
+        /* The level before is done: shaders can read it */
+        transition_levels(command_buffer, image->handle, level - 1, 1,
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                          shader_stages, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+
+        width  = next_width;
+        height = next_height;
+    }
+
+    /* The last level was only written (level 0 when there are no mipmaps) */
+    transition_levels(command_buffer, image->handle, image->mip_levels - 1, 1,
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                      shader_stages, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+}
+
 bool at_vk_image_upload(at_vk_image         *image,
                         at_vk_allocator     *allocator,
                         at_vk_upload        *upload,
@@ -213,13 +314,13 @@ bool at_vk_image_upload(at_vk_image         *image,
         return false;
     }
 
-    /* 2. Make the image ready to receive a copy */
-    transition_image(command_buffer, image->handle,
-                     VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_PIPELINE_STAGE_2_NONE, 0,
-                     VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+    /* 2. Make every level ready to receive a copy */
+    transition_levels(command_buffer, image->handle, 0, image->mip_levels,
+                      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      VK_PIPELINE_STAGE_2_NONE, 0,
+                      VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT);
 
-    /* 3. Copy the pixels into the image */
+    /* 3. Copy the pixels into level 0 */
     VkBufferImageCopy region;
     memset(&region, 0, sizeof(region));
     region.bufferOffset                    = 0;
@@ -236,13 +337,8 @@ bool at_vk_image_upload(at_vk_image         *image,
     vkCmdCopyBufferToImage(command_buffer, staging.handle, image->handle,
                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    /* 4. Make the image readable by shaders */
-    transition_image(command_buffer, image->handle,
-                     VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                     VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                     VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                     VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                     VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    /* 4. Build the smaller levels and make them all readable by shaders */
+    generate_mipmaps(command_buffer, image);
 
     bool ok = at_vk_upload_submit(upload, context);
 

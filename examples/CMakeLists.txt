@@ -125,3 +125,8 @@ archtype_add_shaders(meshes3d_c
 # are no shaders to compile here. Tab adds a crowd of cubes (draw calls).
 add_executable(scene3d_c c/scene3d/main.c)
 target_link_libraries(scene3d_c PRIVATE Archtype::archtype)
+
+# 3D materials: colors, textures, highlights, emission, unlit, double-sided,
+# alpha cutoff and transparency, and a floor with and without mipmaps
+add_executable(materials3d_c c/materials3d/main.c)
+target_link_libraries(materials3d_c PRIVATE Archtype::archtype)

@@ -121,6 +121,7 @@ Executables are placed in `build/bin/`, next to the compiled shaders (`shaders/`
 | `camera3d_c` | 3D perspective camera with a free fly camera (right mouse button to look, WASD to move) and the depth buffer, with a 2D HUD on top. |
 | `meshes3d_c` | Primitive meshes (cube, plane, sphere) with debug views of their normals, texture coordinates and tangents (Tab or 1 to 4). |
 | `scene3d_c` | A scene drawn with the engine's 3D renderer, with no shaders of its own; Tab adds a crowd of 2500 cubes to watch the draw calls. |
+| `materials3d_c` | Materials: highlights, textures, emission, unlit, double-sided, alpha cutoff and transparency; M turns the floor's mipmaps on and off. |
 
 
 ## Technologies

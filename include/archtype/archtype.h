@@ -26,6 +26,7 @@
 #include "archtype/renderer/camera3d.h"
 #include "archtype/renderer/fly_camera.h"
 #include "archtype/renderer/mesh.h"
+#include "archtype/renderer/material.h"
 #include "archtype/renderer/renderer3d.h"
 #include "archtype/renderer/buffer.h"
 #include "archtype/renderer/texture.h"

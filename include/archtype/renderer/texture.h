@@ -30,6 +30,14 @@ typedef struct at_texture_options {
     at_texture_filter      filter;
     at_texture_wrap        wrap;
     at_texture_color_space color_space;
+
+    /* Mipmaps: smaller copies of the texture (half the size each, down   */
+    /* to 1x1), generated on the GPU when it is created. The GPU reads    */
+    /* the copy that fits the size on screen, so textures seen far away   */
+    /* or at an angle don't shimmer. Recommended for 3D; they take a      */
+    /* third more memory. Off by default (2D draws textures at about      */
+    /* their own size).                                                   */
+    bool                   mipmaps;
 } at_texture_options;
 
 /* Loads a texture from an image file (PNG, JPG, BMP, TGA...).           */
